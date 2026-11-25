@@ -1,0 +1,8 @@
+{
+  "name": "Joy Media PR",
+  "description": "Joy Media PR is a digital PR and growth agency offering guest posting, press releases, UGC AI videos, custom web development, Shopify solutions, and digital products.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /workstream/
+Disallow: /checkout/
+Disallow: /payments/
+Disallow: /wallet/
+Disallow: /add-service
+
+Sitemap: https://joymediapr.com/sitemap.xml

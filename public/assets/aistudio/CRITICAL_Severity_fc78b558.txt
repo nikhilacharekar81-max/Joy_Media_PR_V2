@@ -1,0 +1,225 @@
+CRITICAL Severity
+1. Real PayPal Webhook Settlement Always Fails Verification
+Location: server/domains/finance/paymentGateways.ts:1051, 1081, server/domains/finance/finance.routes.ts:2180
+Root Cause: When creating a PayPal checkout session, custom_id and invoice_id are set to the internal checkout ID (chk_...), while PayPal's Order ID (8AB...) is saved in provider_tx_id. When PAYMENT.CAPTURE.COMPLETED arrives, finance.routes.ts:2180 passes sessionId: preSess.provider_tx_id and expectedCheckoutId: preSess.id. Unlike Stripe (1005) and Razorpay (1123), the PayPal verifier compares customId !== params.sessionId (chk_... !== 8AB...) instead of checking params.expectedCheckoutId.
+Impact: Every real PayPal capture webhook is rejected with "PayPal capture custom_id mismatch", preventing asynchronous webhook-based settlement if the buyer's browser closes before returning from PayPal.
+Fix: Match custom_id / invoice_id against params.expectedCheckoutId || params.sessionId and verify the PayPal order ID from supplementary_data.related_ids.order_id against params.sessionId.
+2. PayPal Simulated Capture Bypass When Live Sandbox Credentials Are Configured
+Location: server/domains/finance/paymentGateways.ts:698, server/domains/finance/finance.routes.ts:1475
+Root Cause: handlePayPalCaptureRoute allows client-supplied req.body.paypalOrderId / token / orderID to override the session's stored sess.paypal_order_id. capturePayPalOrder then short-circuits to { verified: true } whenever params.paypalOrderId.startsWith('sess_sim_') in any non-production environment where PAYMENT_SIMULATION_ENABLED !== 'false', even when real PayPal Sandbox credentials are active.
+Impact: In staging/preview/non-production deployments, any user can supply a sess_sim_* order ID to credit their wallet and fund orders without completing payment.
+Fix: Never allow the client request to override a persisted sess.paypal_order_id (only accept matching IDs), and restrict simulated captures strictly to sessions that were explicitly created in simulation mode with simulation explicitly opted in.
+3. Admin 2FA & Password Bypass via Shared Email Verification OTP Slot
+Location: server/routes/authRoutes.ts:201-305, server/services/authService.ts:436-454
+Root Cause: Admin 2FA and new-device login challenges store their 6-digit code in auth_verification_codes under (email, type = 'verify')—the exact same type consumed by POST /api/auth/verify-email. That endpoint does not verify that emailVerified is currently false, does not check password/device/lockout state, and immediately mints a full JWT (including for super_admin and admin).
+Impact: Any code generated for admin 2FA or new-device login can be redeemed on /api/auth/verify-email to bypass login controls and obtain a valid session token.
+Fix: Use distinct OTP type values (email_verify, admin_2fa, device_verify), bind login 2FA challenges to a single-use server-side challenge token issued only after password verification, and reject /api/auth/verify-email if user.emailVerified is already true.
+4. Unsettled PayPal Chargebacks & Partial Refunds Leave Escrow Active and Seller Paid Out
+Location: server/domains/finance/finance.routes.ts:1928-1988, server/domains/finance/financial.service.ts:1788-1803
+Root Cause:
+When a buyer funds an order via PayPal, wallet funds immediately move into escrow (available_balance = 0). If PayPal later sends payment.capture.refunded or payment.capture.reversed, reverseGatewayDeposit sees available_balance < revAmount and only records a reconciliation_exceptions row—it does not freeze the buyer/order, open a dispute, pause escrow release, or reverse ledger account 1020.
+Any refund event marks payment_checkout_sessions.status = 'refunded', causing subsequent partial refund webhooks on the same capture to be ignored.
+Impact: A seller can still deliver and withdraw funds after the buyer's PayPal payment was charged back or refunded, causing direct financial loss; multiple partial refunds are silently dropped.
+Fix: Track cumulative refunded_amount per checkout session (only mark fully refunded when cumulative refunds reach the captured total), automatically freeze/dispute any linked active escrows on chargeback/reversal, and record a negative-balance / clawback receivable ledger entry.
+5. Payment Method Masking/Encryption Bypass & Sensitive Credential Exposure
+Location: server/domains/finance/finance.repo.ts:215-248, server/domains/finance/finance.routes.ts:2904-2965
+Root Cause:
+validateAndNormalizePaymentMethodDetails only masks/encrypts bank fields when normType === 'bank_transfer' || normType === 'bank'. Sending type: 'Bank Transfer' or 'Wire Transfer' (the exact strings sent by PaymentsModule.tsx:190 and accepted by payout.service.ts) bypasses encryption and stores plaintext accountNumber, iban, and routingNumber in JSONB.
+stripe/card payment method types do not strip raw cardNumber/number fields.
+GET /api/payments/methods/:userId returns encryptedAccountNumber ciphertext to the client, and POST /api/payments/methods returns the raw unmasked newMethod object (including accountNumber and routingNumber).
+Impact: Plaintext bank account and routing numbers are persisted in the database and returned over API responses.
+Fix: Normalize payment method types (lowercase + replace spaces/hyphens with _) before matching, reject raw card numbers outright, strip encrypted ciphertext and sensitive fields from all API responses, and return only masked last-4 metadata.
+HIGH Severity
+6. Checkout Reservation Race, Cross-Purpose Session Reuse & Validation Bypass
+Location: server/domains/finance/finance.routes.ts:884-935, 981-1037
+Root Cause:
+A concurrent request encountering a 'reserving' session returns { reused: false, checkoutId: activeSess.id } (1031-1037), causing the handler to create a second PayPal order and overwrite provider_tx_id/paypal_order_id on the same row.
+Session reuse (981-1029) matches only on user + amount within 5 minutes, ignoring purpose, orderId, and metadata.
+Sending purpose: 'order_payment' with orderId and metadata.returnAction (892-935) skips order ownership, status, and amount checks and accepts an arbitrary callerAmount with no upper bound (930).
+Impact: Duplicate PayPal orders overwrite active session IDs (orphaning paid sessions), unrelated checkout purposes cross-contaminate, and arbitrary checkout amounts can be initiated against any order ID.
+Fix: Return 409 Conflict (or await the existing reservation) when status is 'reserving'; scope reuse matching by (user_id, purpose, order_id, amount, metadata_hash); always verify order ownership/status and enforce a strict MAX_ORDER_AMOUNT ceiling regardless of metadata.returnAction.
+7. Missing Account Status, Financial-Freeze & Maintenance Checks Across Mutating Endpoints
+Location:
+server/middleware/auth.ts:538-552 (requireFinancialActiveStatus never checks maintenanceMode)
+server/domains/finance/finance.routes.ts:852, 1589-1685, 2227, 2670, 2918-2992 (checkout, PayPal capture, invoice creation, payment methods lack status/maintenance checks; /api/payments/escrow/release lacks rate limiting)
+server/routes/orderRoutes.ts:2426, 2429 (POST /api/orders/:id/cancel, PUT /api/orders/:id)
+server/routes/workstreamRoutes.ts:190-195, 533, 677, 1895-2034, 2158 (upload, messages, offers—lines 1895-2034 explicitly allow restricted users to fund/release escrow; accept-offer lacks requireFinancialActiveStatus)
+server/websocket.ts:449-483 (NEW_MESSAGE skips active status & maintenance checks)
+server/routes/userRoutes.ts:58-534 (profile, notification prefs, availability, user update, membership endpoints)
+server/routes/reviewRoutes.ts:267-352 (review write endpoints also lack rate limiting)
+Impact: Suspended, restricted, frozen, or deactivated accounts—and regular users during platform maintenance—can still execute financial operations, modify profiles, send messages/uploads, and post reviews.
+Fix: Apply requireActiveStatus (for general mutations) and requireFinancialActiveStatus (including a maintenanceMode check and blocking restricted accounts from fund movement) consistently across all REST and WebSocket write handlers, and add rate limiting to escrow release and review endpoints.
+8. Non-Atomic First-Run Admin Setup & Unchecked Email Overwrite
+Location: server/routes/authRoutes.ts:543-576
+Root Cause: POST /api/auth/admin-setup checks setup status and updates the admin user without a database transaction/lock, and overwrites targetAdmin.email = targetEmail without checking whether another account already owns that email.
+Impact: Race conditions during initial setup can corrupt admin credentials or cause duplicate-email constraint failures / account collisions.
+Fix: Wrap setup in a serializable/locked DB transaction (SELECT ... FOR UPDATE), verify email uniqueness before updating, and enforce a one-time setup flag in app_metadata.
+9. Login Lockout Bypass via userId & Arbitrary Account Lockout DoS
+Location: server/services/authService.ts:261-371
+Root Cause: Failed login counters are keyed on login:${lookupEmail || lookupId}. An attacker can alternate between { email } and { userId } to double attempts or bypass one bucket; conversely, because the lockout key is scoped only to email (not (email, IP)), anyone can lock out any known user or admin every 15 minutes.
+Impact: Weakened brute-force protection and trivial denial of service against legitimate user/admin logins.
+Fix: Always normalize lockout keys to the resolved canonical user.id AND track progressive throttling per (user.id, clientIP) plus IP-level rate limits.
+10. Payout Method Allowlist Bypass, Substring Admin Check & Missing Row Lock
+Location: server/domains/finance/financial.service.ts:1890, 2524, 2578, server/domains/finance/payout.service.ts:481
+Root Cause:
+requestPayout (1890) and retryPayout (2578) check methodsObj[params.method] using display names ('Bank Transfer', 'PayPal') against camelCase config keys (bankTransfer, paypal), so the lookup is always undefined and disabled payout methods are never blocked.
+retryPayout (2524) grants admin-level retry privileges using actorLower.includes('admin') (a substring check on the actor string).
+payout.service.ts:481 reads the payout row without FOR UPDATE before executing a retry.
+Impact: Users can withdraw through disabled payout rails; any user whose display name/actor string contains "admin" satisfies the retry authorization check; concurrent retries can double-execute a payout.
+Fix: Map canonical payout method names to config keys explicitly, check verified role (isStaffUser) instead of string substrings, and lock the payout row with SELECT ... FOR UPDATE inside a transaction before retrying.
+11. Immediate Email Change Without Verification & Broken Frontend Settings Flow
+Location: server/routes/userRoutes.ts:177-236, server/routes/adminRoutes.ts:824-839, src/pages/SettingsPage.tsx:117-125
+Root Cause:
+PATCH /api/users/email does not validate email syntax (isValidEmail), allows OAuth-created accounts without a password to change email with no re-authentication, immediately overwrites user.email, and revokes existing sessions before the new email is verified.
+SettingsPage.tsx:117-125 sends { email } without currentPassword (causing password users to always fail) and discards the new JWT returned by the server (causing OAuth users to be immediately logged out on the next request).
+PATCH /api/admin/users/:id (adminRoutes.ts:824-839) permits setting email to an empty or malformed string.
+Impact: Users can lock themselves out via typos, OAuth sessions can be hijacked permanently without re-auth or email confirmation, and the Settings email-update UI is broken for all users.
+Fix: Validate email format everywhere, require confirmation via an OTP sent to the new address (pending_email) before committing the change, require password or fresh OAuth re-auth, and update SettingsPage.tsx to collect currentPassword and persist any refreshed session token.
+12. Unauthenticated SMS Resend & Unverified-Email Account Verification Bypass
+Location: server/routes/authRoutes.ts:376-496
+Root Cause: POST /api/auth/resend-sms-code requires no authentication and does not verify that the requested phone number belongs to the caller. POST /api/auth/verify-sms sets user.verified = true even when user.emailVerified is false.
+Impact: Unauthenticated callers can trigger SMS code overwrites/spam for arbitrary accounts, and unverified-email accounts can obtain verified = true status via SMS alone.
+Fix: Require authentication (or a signed registration challenge token) and phone-ownership validation on resend-sms-code, and only set user.verified = true once all required verification factors (including email when enabled) are complete.
+13. Moderation Bypasses Allowing Unapproved Gigs/Projects to Be Purchased or Bid On
+Location: server/routes/gigRoutes.ts:337-364, server/services/orderService.ts:315-319, server/routes/adminRoutes.ts:1337-1356, server/routes/projectRoutes.ts:555, server/routes/proposalRoutes.ts:157
+Root Cause:
+Editing a gig while passing { status: 'active' } hits the else if branch in gigRoutes.ts:337-364, skipping re-moderation after content edits.
+resolveGigOrderPrice (orderService.ts:315-319) never checks gig.moderationStatus === 'approved'.
+adminRoutes.ts:1337-1356 allows setting status: 'active' on a pending/rejected gig without approving moderation.
+POST /api/projects/:id/hire (without proposalId) resets project.status = 'open' without checking moderationStatus, and POST /api/proposals does not verify isProjectPublic(proj).
+Impact: Unmoderated, pending, or rejected listings can be edited past moderation, purchased directly, or bid on.
+Fix: Always evaluate content-change re-moderation independently of status updates; enforce status === 'active' && moderationStatus === 'approved' in resolveGigOrderPrice and isProjectPublic(proj) in proposal creation/hiring.
+14. Direct Order Creation Accepts Arbitrary Unbounded Amounts & Lacks Idempotency
+Location: server/routes/orderRoutes.ts:459, 511-585
+Root Cause: POST /api/orders when neither gigId nor projectId is provided accepts a raw client-supplied amount without checking MAX_ORDER_AMOUNT, without enforcing 2-decimal precision, and without requiring an idempotency key.
+Impact: Double-clicks or retries create duplicate orders, and malformed/extreme numeric amounts can enter order and fee calculations.
+Fix: Validate amount against [MIN_ORDER_AMOUNT, MAX_ORDER_AMOUNT] with strict 2-decimal rounding, and enforce a deduplication/idempotency key on order creation.
+15. Proposal Bait-and-Switch & Concurrency Races
+Location: server/routes/proposalRoutes.ts:163-199, 254-428, 520-589
+Root Cause:
+A freelancer can edit bidAmount upward immediately before a buyer accepts the proposal—there is no expected-amount check or version/etag check on accept.
+Duplicate proposal checks and proposal withdrawal (proposals_count increment/decrement) are non-atomic, allowing duplicate proposals and counter drift.
+After committing an order transaction, store.saveProject(proj) overwrites the project row outside the transaction, clobbering concurrent updates.
+bidAmount at lines 314 and 349 is not rounded to 2 decimal places.
+Impact: Buyers can be charged more than the bid amount they viewed; concurrent bids/withdrawals corrupt proposals_count and project state.
+Fix: Require expectedBidAmount (or proposal updatedAt version) when accepting a proposal, enforce a DB unique index on (project_id, freelancer_id) for active proposals, perform project status and counter updates atomically inside the transaction, and round bidAmount to cents.
+16. Admin Hierarchy & RBAC Inconsistencies
+Location: server/routes/userRoutes.ts:451-470, 600-611, server/routes/adminRoutes.ts:809-862, 1004-1097, server/middleware/auth.ts:554-671, server/routes/authRoutes.ts:600
+Root Cause:
+Regular admin users can flag a super_admin, delete another admin (or themselves), and suspend another admin.
+support users can mark super_admin emails as read even though GET /api/user-emails/:userId blocks them from viewing super_admin emails.
+moderator and finance_manager are assignable roles in admin endpoints but are omitted from isStaffUser() and demo-session privileged role checks.
+requireRole/requireAdmin perform case-sensitive comparisons while isStaffUser lowercases roles.
+Impact: Privilege escalation across admin tiers, broken access for moderator/finance_manager staff, and inconsistent authorization enforcement.
+Fix: Enforce a strict numeric role hierarchy (super_admin > admin > finance_manager/moderator/support > user) for all flag/suspend/delete/email operations, prevent self-deletion/self-suspension, include all staff roles consistently, and normalize roles to lowercase across all middleware.
+17. Stale Wallet Balance & Earnings Overwrite in IdentityRepo.saveUsers
+Location: server/domains/identity/identity.repo.ts:45, 54, 74, 77
+Root Cause: The upsert passes u.walletBalance ?? 0 and u.earned ?? 0 (which are never null), so COALESCE(EXCLUDED.wallet_balance, users.wallet_balance, 0) always overwrites users.wallet_balance and users.earned on every saveUser call (e.g., saving a profile edit or known login device).
+Impact: Any concurrent deposit, escrow lock, payout, or release occurring between loading a user and saving their profile overwrites users.wallet_balance and users.earned with stale values, creating drift against the authoritative wallets table.
+Fix: Exclude wallet_balance and earned from general profile UPDATE clauses in saveUsers (only update them via the financial service inside row-locked wallet transactions).
+18. Production Startup Crash Risk & Cloud Storage Fallback Mismatch
+Location: server/db/postgresStore.ts:552-562, server/cloudStorage.ts:45, 64, 92-113
+Root Cause:
+runMigrations executes GRANT ALL ... TO "ai_studio_app_user", which fails on standard hosted PostgreSQL instances that do not define that role.
+cloudStorage.ts fails uploads if GOOGLE_CLOUD_PROJECT is set without GCS_BUCKET_NAME, and openCloudFileStream skips the isTestOrLocal guard used on the write path.
+Impact: Application fails to boot on standard PostgreSQL environments and fails to serve uploaded workstream files when local/cloud flags diverge.
+Fix: Check pg_roles before issuing GRANT (or only run it when configured via env var), and unify the local-vs-GCS selection helper across upload, stream, and delete functions.
+19. Non-Functional / Client-Only Settings, Impersonation & Admin Controls
+Location:
+src/pages/SettingsPage.tsx:30-75, 113-137, 304, 389-420, 586-705
+src/pages/AdminPage.tsx:720-723
+src/components/admin_modules/AdminCmsModule.tsx
+src/components/admin_modules/AdminContractsModule.tsx:117-158
+server/routes/adminRoutes.ts:929-956, 1752-1803
+Root Cause:
+SettingsPage: Password change, Personal URL, Security Question (hardcoded 'Mumbai'), Primary Category, Currency, Tax Residency (hardcoded 'India'), Profile Visibility, Search Indexing, Vacation Mode, and the "Buy More Proposal Credits ($15)" / "Buy Now Featured Credits ($25)" buttons never call any backend API—they only update local React state and display fake success toasts. The withdrawal account field is hardcoded to 'Bank Transfer (Chase *8821)'.
+Admin Impersonation (AdminPage.tsx:720-723): Never calls POST /api/admin/users/:id/impersonate; it only swaps a client React variable while all API requests continue running with the admin's JWT and without server audit logging.
+AdminCmsModule: Purely in-memory/localStorage stub with no backend persistence (AdminPage.tsx:90 mounts <AdminCmsModule /> with no API wiring).
+Admin Reports & Messages Moderation (adminRoutes.ts:929-956, 1752-1803): Action endpoints only write audit logs and never persist status changes; GET endpoints hardcode status: 'pending' and moderationStatus: 'clean'.
+AdminContractsModule (124): Clicking "Admin Force Release" on a single milestone calls POST /api/admin/orders/:id/force-complete, which force-completes the entire order instead of releasing only the selected milestone.
+Impact: Users believe password changes, privacy settings, credit purchases, CMS edits, and report/message moderation actions succeeded when nothing was persisted; admins can accidentally settle an entire contract while attempting to release a single milestone.
+Fix: Wire each Settings action to real backend endpoints (or remove unimplemented controls), route impersonation through /api/admin/users/:id/impersonate with a dedicated scoped impersonation token, persist CMS/reports/message moderation state in PostgreSQL, and align milestone release UI with actual order-level completion or implement true per-milestone escrow release.
+MEDIUM Severity
+20. Financial Reconciliation Blind Spot, Cross-Role Ledger Drift & Top-Up Fee Mismatch
+Location: server/domains/finance/financial.service.ts:1086, 1594, 1710, 1947, 2973, 3148-3309
+Root Cause:
+runFinancialReconciliation never compares total wallets.available_balance against Ledger Liability Accounts 2010 + 2020.
+Cross-role users (e.g., both or users acting as both buyer and freelancer) can debit/credit mismatched liability accounts (2010 vs 2020), causing sub-ledger drift.
+Topping up an order so its total crosses the $200 small-order threshold overwrites orders.small_order_fee to 0 while escrows.small_order_fee retains $1.
+Fix: Add an explicit SUM(wallets.available_balance) === balance(2010) + balance(2020) reconciliation check, standardize user wallet liability accounting per user/account consistently, and keep orders.small_order_fee and escrows.small_order_fee synchronized on top-ups.
+21. PayPal Cannot Be Disabled While Credentials Exist & 5-Minute Replay Window Breaks Retries
+Location: server/domains/finance/paymentGateways.ts:351, 604-607
+Root Cause: PayPal enablement falls back to credential presence even when enabled: false is set in admin settings, and webhook timestamp replay rejection at 5 minutes (300s) rejects legitimate PayPal webhook retries (which PayPal retries for up to 72 hours).
+Fix: Respect the explicit enabled boolean flag when selecting active gateways, and deduplicate webhooks using transmission_id / event.id in the database rather than rejecting retries older than 5 minutes.
+22. Hardcoded 14-Day Earnings Clearing Period Ignores Admin Setting
+Location: server/domains/finance/financial.service.ts:1242
+Root Cause: Clearance maturation hardcodes 14 days instead of reading the configured escrowProtectionDays / clearingPeriodDays from siteSettings.
+Fix: Read the clearing period dynamically from siteSettings (with a safe fallback to 14).
+23. SiteSettings Partial Mutation, Dead Rollback, Stale Resets & Hardcoded Test Key
+Location: server/domains/admin/siteSettings.ts:218, 280, 357, 466, 505-514, 552-555, 607-706
+Root Cause:
+syncFeesToLedger() is called without await inside a try/catch rollback block, making the rollback dead code.
+resetToDefaults() only resets commissionPercent in financeService, leaving buyer fee and small-order fee parameters stale.
+updateFromFlatObject({ currency: 'EUR' }) mutates 4 other settings sections before throwing on unsupported currency.
+this.history is stored only in memory with no upper bound; requireEmailVerification silently reverts to true on the 5-second DB refresh; maximumGigPrice is silently clamped to 10000; defaults include a hardcoded pk_test_51Mz...•••• string.
+Fix: Validate all flat-object inputs before mutating any section, await ledger sync on save, reset all fee fields in resetToDefaults(), bound this.history, persist requireEmailVerification accurately, and remove hardcoded placeholder Stripe keys.
+24. WorkspaceService Full-Table Scan & Map-Clear Race Condition
+Location: server/domains/workspace/workspace.service.ts:146-149
+Root Cause: getWorkspacesForUserAsync runs SELECT * FROM workspaces (unfiltered 
+ scan) and calls this.workspaces.clear() before repopulating the shared in-memory map on every request.
+Impact: Concurrent requests reading this.workspaces during the clear window transiently see empty/missing workspaces, and performance degrades linearly with total platform workspaces.
+Fix: Query PostgreSQL directly with WHERE buyer_id = $1 OR seller_id = $1 and avoid clearing shared global caches per request.
+25. OrdersRepo Partial Terminal-State Protection & Read-Time DB Mutation
+Location: server/domains/orders/orders.repo.ts:62-69, 267-275
+Root Cause: saveOrders preserves terminal status (completed/cancelled/refunded) via CASE, yet still overwrites amount, service_fee, fee_breakdown, and deliverables on terminal orders. Additionally, getOrder triggers resolveWorkspaceActiveOrder, issuing UPDATE workspaces during read-only GET requests.
+Fix: Guard all immutable financial/deliverable columns once an order reaches a terminal status, and move workspace active-order reconciliation out of GET handlers into explicit write transitions.
+26. Fabricated Transactions & Invoices on Empty Inputs
+Location: server/domains/finance/finance.routes.ts:2490-2548, 2817
+Root Cause: GET /api/payments/transactions/:userId synthesizes fake escrow_fund transactions for all user orders (including cancelled or unfunded ones) whenever wallet_movements is empty. POST /api/payments/invoices fabricates a $100 line item if items is empty and has no rate limit or amount cap.
+Fix: Return an empty list when no actual wallet movements exist (never fabricate ledger history), require at least one valid line item on invoice creation, and enforce rate limits and amount bounds.
+27. Database Schema & Migration Gaps
+Location: server/db/migration.sql:647, 711, 984, server/domains/marketplace/marketplace.repo.ts:360
+Root Cause:
+All 39 foreign key constraints are added with NOT VALID and never followed by ALTER TABLE ... VALIDATE CONSTRAINT.
+idx_unique_messages_client_msg_id relies on (order_id, client_message_id), which does not deduplicate inquiry workspace messages where order_id IS NULL.
+projects.slug lacks a unique index, and MarketplaceRepo.getProject (360) fetches by slug without ORDER BY or LIMIT 1.
+Fix: Validate FKs once data hygiene is confirmed, add a partial unique index on (workspace_id, client_message_id) WHERE order_id IS NULL, and add a unique index on projects.slug (or deterministic ORDER BY created_at DESC LIMIT 1).
+28. Memory Leaks, Session Eviction Bug, WebSocket & SSR Edge Cases
+Location:
+server/db/postgresStore.ts:339, 404-412 (locks Map grows without bound; withLock silently drops writes before isHydrated)
+server/middleware/auth.ts:151-166 (registerNewUserSession increments sessionVersion before counting active sessions, so session eviction never triggers; LEGACY_TOKEN_COMPAT_UNTIL_MS slides 24 hours forward on every server restart)
+server/websocket.ts:72-90, 138-208, 421-438 (no Origin validation on WebSocket upgrade; cross-instance DB poller stalls when >50 rows share the same timestamp and compares string vs Date; SUBSCRIBE_WORKSTREAM checks orders but ignores workspaces)
+server/ssr.ts:197-208, 391, 415-484 (trailing-slash or uppercase URL paths return 404; app.use('*') serves SSR HTML for non-GET methods; pre-warm can cache empty unhydrated HTML)
+Fix: Evict idle keys from PostgresStore.locks and reject/queue writes before hydration; count existing sessions before incrementing sessionVersion and anchor legacy token expiry to a fixed timestamp; validate Origin on WS upgrade, use cursor (created_at, id) pagination in the WS poller, and support workspaces in SUBSCRIBE_WORKSTREAM; normalize paths, restrict SSR catch-all to GET/HEAD, and wait for DB hydration before pre-warming SSR cache.
+29. Token Storage, Open Redirect Risk & Frontend Error/State Bugs
+Location:
+src/utils/authToken.ts:9-29 & server.ts:216: Bearer JWT and full current_user JSON are stored in localStorage while CSP allows 'unsafe-inline' scripts, maximizing impact if any XSS is introduced.
+src/utils/gatewayCheckout.ts:80-81: Assigns window.location.href = data.redirectUrl without verifying that the scheme is https: (or a safe relative / path).
+src/components/checkout/CheckoutResultView.tsx:100, 256, 480, 691: If post-payment continuation fails, continuationRanRef stays true with no retry path; fallback simulated order ID uses sim_order_... (mismatched with server's sess_sim_ prefix); returnPath is not validated as an internal relative path.
+src/utils/workstreamUpload.ts:41: Reads errorData.message instead of errorData.error, hiding all server upload error messages from users.
+src/App.tsx:599-622, 944-996: handlePublishGig, handleForgotRequest, and handleForgotReset silently swallow non-OK responses without showing error feedback; handleForgotVerify advances to the password-reset step without verifying the OTP server-side.
+src/hooks/useAppData.ts:41-44, 181: Initializes default fee state to 20% / 1% / $1 even when AGENCY_MODE: true (0%), and skips fetching /api/fees/config on landing pages.
+src/hooks/workstream/useWorkstreamMessages.ts:250: retryMessage exits early if !msg.orderId, making retries completely non-functional for inquiry (workspace-only) messages.
+src/components/PaymentsModule.tsx:1352-1365: handleExportTransactionsCsv manually builds CSV strings without formula-injection sanitization (unlike src/utils/csvExport.ts).
+src/components/profile/EditProfilePage.tsx:48-68, 86-89, 250, 389, 423: Falls back to a hardcoded mock user (Nikhil A, hello@joymediapr.com) when logged out; encodes arbitrary-size uploaded images to base64 data URLs without size limits; compounds fluency labels on repeated saves ("English (Fluent)" → "English (Fluent) (Fluent)").
+src/pages/AdminPage.tsx:236-240, 673-694, 712 & src/components/admin_modules/*: Contracts tab injects hardcoded client@example.com/freelancer@example.com and Unsplash URLs; paymentGateways and memberships tabs render an empty <h1>; platformBalance sums cancelled, refunded, and unfunded orders; admin modules hide deleted IDs in localStorage (DELETED_*_KEY), masking failed deletions or cross-session state; AdminCategoriesModule.tsx:84 falls back to fabricated servicesCount.
+30. Workstream, Notification & Validation Issues
+Location:
+server/routes/workstreamRoutes.ts:814-817, 878-886, 1113, 1273: Buyers can submit seller offers inside inquiry workspaces; staff are blocked from GET /api/orders/:id/offers on inquiry workspaces; escapeHtml is persisted into deliveryNotes, causing double-escaped HTML entities (&amp;, &#39;) when React renders them.
+server/services/workstreamService.ts:767: Delivery URL validation accepts arbitrary https:// strings without validating a real hostname.
+server/services/notificationService.ts:29, 57, 134: Logs the last 2 digits of 6-digit OTPs (****XX) to stdout (reducing brute-force entropy by 100x), and the Resend API fetch has no timeout (AbortSignal.timeout).
+server/domains/identity/identity.repo.ts:234-235: listUserEmailsForUser applies /\b\d{6}\b/g redaction across email bodies, corrupting legitimate 6-digit order IDs, postal codes, and dollar amounts.
+server/services/messagingService.ts:29, 106-111: No max length on clientMessageId; recordMessage does not update workspaces.updated_at / last_activity_at.
+server/services/reviewService.ts:39: Queries a non-existent talents table on every review recalculation.
+server/services/orderService.ts:295-301: ensureWallet catches and silently swallows DB errors.
+server/routes/userRoutes.ts:472-532: Membership tier quotas (jobPostsPerMonth, bidsPerMonth) are stored on the user record but never enforced on project or proposal creation.
+LOW Severity
+CSV Sanitizer Misses Tab & Carriage Return (server/domains/finance/financial.service.ts:515): Only checks =, +, -, @ and omits leading \t and \r.
+Adjustment Idempotency Day-Bucket Collision (server/domains/finance/financial.service.ts:2704-2715): Fallback idempotency key hashes by calendar day, causing a legitimate second identical admin adjustment on the same day to be silently dropped as a duplicate.
+Device Verification Inverted Default (server/services/authService.ts:48-50): USER_DEVICE_VERIFICATION defaults to !IS_PRODUCTION, disabling it in production unless explicitly enabled.
+Google Token Issuer Check Missing (server/routes/authRoutes.ts:1198-1226): tokeninfo validation checks aud and email_verified but does not verify iss (accounts.google.com / https://accounts.google.com).
+Denylist URL Check & Oversized Base64 Images in DB (server/routes/gigRoutes.ts:181, 329, server/routes/userRoutes.ts:32-39): URL validation uses a denylist rather than an http:/https: allowlist, and multi-MB base64 data URLs can be stored directly inside PostgreSQL rows.
+Non-Atomic Project Question Reply Append (server/routes/projectRoutes.ts:314-327): Read-modify-write on JSONB replies can lose concurrent replies.
+Untrimmed projectId in Proposal Creation (server/routes/proposalRoutes.ts:182, 198): Leading/trailing whitespace in projectId can cause lookup/storage mismatches.
+Server-Locale Timestamps (server/routes/orderRoutes.ts:214, server/services/orderService.ts:1285): Uses toLocaleString() instead of ISO-8601 UTC strings, producing inconsistent date formats across server locales.
+Unclosed AudioContext on Every Notification Sound (src/layout/Header.tsx:129): Creates a new AudioContext on every incoming notification without closing it, eventually hitting browser hardware context limits.
