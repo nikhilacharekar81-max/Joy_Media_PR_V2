@@ -697,7 +697,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   <CreditCard className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-slate-800">Payments, Invoices &amp; Wallet</h2>
+                  <h2 className="text-sm font-bold text-slate-800">Billing &amp; Invoices</h2>
                   <p className="text-xs text-slate-500 mt-0.5">
                     View your transaction ledger, download invoices, and manage order payments in the Billing Center.
                   </p>

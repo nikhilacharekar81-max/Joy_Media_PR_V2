@@ -4,11 +4,15 @@
  */
 
 import type { UserAccount, Gig, Project } from '../src/types.js';
+import { SITE_CONFIG } from '../src/siteConfig.js';
+import { DEFAULT_AVATAR } from '../src/constants.js';
+import { slugify } from '../src/utils/slugify.js';
 import { EXCLUDED_STAFF_ROLES, isExcludedStaffRole } from './middleware/auth.js';
 
 export { EXCLUDED_STAFF_ROLES };
 
 export function isUserPublic(u: any): boolean {
+  if (SITE_CONFIG.AGENCY_MODE) return false;
   if (!u || typeof u !== 'object') return false;
 
   // Must have active status
@@ -74,13 +78,25 @@ export function sanitizePublicGig(g: Gig) {
     new Date(featuredUntil).getTime() > Date.now()
   );
 
-  return {
+  const sanitized = {
     ...publicGig,
     featured: isFeaturedActive,
     isFeatured: isFeaturedActive,
     featuredUntil: isFeaturedActive ? featuredUntil : null,
     featured_until: isFeaturedActive ? featuredUntil : null
   };
+
+  if (SITE_CONFIG.AGENCY_MODE) {
+    return {
+      ...sanitized,
+      freelancerName: SITE_CONFIG.brandName,
+      freelancerUsername: slugify(SITE_CONFIG.brandName),
+      freelancerAvatar: DEFAULT_AVATAR,
+      freelancerLevel: ''
+    };
+  }
+
+  return sanitized;
 }
 
 const PUBLIC_PROJECT_STATUSES = new Set(['open', 'published', 'in_progress']);

@@ -13,6 +13,7 @@ import type { Express, Request, Response } from 'express';
 import { isGigPublic, sanitizePublicGig, isUserPublic, sanitizePublicUser, isProjectPublic, sanitizePublicProject } from './publicData.js';
 import { slugify } from '../src/utils/slugify.js';
 import { PRIVATE_ROUTES, RESERVED_ROUTES } from '../src/shared/routes.js';
+import { SITE_CONFIG } from '../src/siteConfig.js';
 
 interface SsrHtmlCacheEntry {
   statusCode: number;
@@ -168,7 +169,7 @@ export async function setupSSR(
     const rawData = await getData(pathname);
     const isDataHydrated = rawData.hydrated !== false;
     const PUBLIC_GIGS = rawData.gigs.filter(isGigPublic).map(sanitizePublicGig);
-    const PUBLIC_USERS = rawData.users.filter(isUserPublic).map(sanitizePublicUser);
+    const PUBLIC_USERS = SITE_CONFIG.AGENCY_MODE ? [] : rawData.users.filter(isUserPublic).map(sanitizePublicUser);
     const PUBLIC_PROJECTS = rawData.projects.filter(isProjectPublic).map(sanitizePublicProject);
     const PUBLIC_CATEGORIES = rawData.categories || [];
 
@@ -176,7 +177,7 @@ export async function setupSSR(
       ...(query !== undefined ? { query } : {}),
       ssrHydrated: isDataHydrated,
       gigs: PUBLIC_GIGS,
-      users: PUBLIC_USERS,
+      users: SITE_CONFIG.AGENCY_MODE ? [] : PUBLIC_USERS,
       projects: PUBLIC_PROJECTS,
       ...(PUBLIC_CATEGORIES.length > 0 ? { categories: PUBLIC_CATEGORIES } : {})
     };
@@ -187,13 +188,23 @@ export async function setupSSR(
     // 2. Determine pageType and matching entity
     const isPrivateRoute = (p: string) => {
       const parts = p.split('/').filter(Boolean);
-      return parts.length > 0 && PRIVATE_ROUTES.some(pr => parts[0].toLowerCase() === pr.toLowerCase());
+      if (parts.length === 0) return false;
+      const first = parts[0].toLowerCase();
+      if (PRIVATE_ROUTES.some(pr => first === pr.toLowerCase())) return true;
+      if (SITE_CONFIG.AGENCY_MODE) {
+        if (first === 'profile' || first === 'freelancer' || first === 'user') return true;
+        if (first === 'freelancers' && parts.length >= 2) return true;
+      }
+      return false;
     };
 
     if (isPrivateRoute(pathname)) {
       isPrivate = true;
       initialData.isPrivate = true;
       initialData.pageType = 'private';
+      initialData.gigs = [];
+      initialData.users = [];
+      initialData.projects = [];
     } else if (normalizedLowerPath === '/' || normalizedLowerPath === '') {
       initialData.pageType = 'home';
     } else if (normalizedLowerPath === '/services' || normalizedLowerPath === '/gigs') {
@@ -242,13 +253,17 @@ export async function setupSSR(
         notFound = true;
       }
     } else if (pathParts.length === 1) {
-      const usernameParam = pathParts[0];
-      const matchedUser = PUBLIC_USERS.find(u => (u.username && u.username.toLowerCase() === usernameParam.toLowerCase()) || slugify(u.name) === usernameParam.toLowerCase() || u.id === usernameParam);
-      if (matchedUser) {
-        initialData.pageType = 'freelancer_profile';
-        initialData.profileUser = matchedUser;
-      } else {
+      if (SITE_CONFIG.AGENCY_MODE) {
         notFound = true;
+      } else {
+        const usernameParam = pathParts[0];
+        const matchedUser = PUBLIC_USERS.find(u => (u.username && u.username.toLowerCase() === usernameParam.toLowerCase()) || slugify(u.name) === usernameParam.toLowerCase() || u.id === usernameParam);
+        if (matchedUser) {
+          initialData.pageType = 'freelancer_profile';
+          initialData.profileUser = matchedUser;
+        } else {
+          notFound = true;
+        }
       }
     } else {
       notFound = true;

@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "joy-media-pr",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "NODE_ENV=test ALLOW_MOCK_CODES=true tsx --test \"tests/*.test.ts\" \"server/**/*.test.ts\"",
     "paypal:smoke": "tsx scripts/paypal-sandbox-smoke.ts",
     "test:paypal": "tsx tests/paypal-webhook.test.ts",
     "test:paypal:env": "tsx tests/paypal-environment-switch.test.ts",

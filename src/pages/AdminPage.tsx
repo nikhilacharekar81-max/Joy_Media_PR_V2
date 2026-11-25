@@ -94,6 +94,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [adminAuthNotice, setAdminAuthNotice] = useState<{ type: 'error' | 'success' | 'info'; message: string } | null>(null);
   const [needsInitialSetup, setNeedsInitialSetup] = useState(false);
   const [setupConfirmPassword, setSetupConfirmPassword] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false);
 
   const isUserAdmin = currentUser?.role === 'super_admin' || currentUser?.role === 'admin' || impersonatedUser?.role === 'super_admin' || impersonatedUser?.role === 'admin';
@@ -316,13 +317,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     body: JSON.stringify({
                       email: emailToUse,
                       password: loginPassword,
-                      confirmPassword: setupConfirmPassword
+                      confirmPassword: setupConfirmPassword,
+                      ...(setupToken.trim() ? { setupToken: setupToken.trim() } : {})
                     })
                   });
                   const data = await res.json();
                   if (!res.ok) throw new Error(data.error || 'Failed to configure admin password.');
                   setNeedsInitialSetup(false);
                   setSetupConfirmPassword('');
+                  setSetupToken('');
                   setAdminAuthNotice({
                     type: 'success',
                     message: data.message || 'Admin password configured. Please sign in below.'
@@ -369,6 +372,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   onChange={(e) => setSetupConfirmPassword(e.target.value)}
                   minLength={10}
                   required
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-agency-dark focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-agency-dark font-bold uppercase mb-1">Setup token</label>
+                <input
+                  type="password"
+                  placeholder="Required in production (ADMIN_SETUP_TOKEN)"
+                  value={setupToken}
+                  onChange={(e) => setSetupToken(e.target.value)}
                   className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-agency-dark focus:outline-none focus:border-emerald-500"
                 />
               </div>

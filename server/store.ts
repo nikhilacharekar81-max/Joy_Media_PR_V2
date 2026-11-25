@@ -1774,13 +1774,18 @@ export async function hydrateStoreFromPostgres() {
       const defaultAdminPasswordHash = configuredInitialPass
         ? await bcrypt.hash(configuredInitialPass, 10)
         : '';
+      const initialAdminEmail = (process.env.ADMIN_INITIAL_EMAIL || 'admin@joymediapr.com').trim().toLowerCase();
+      const ownerAdminEmail = (process.env.ADMIN_OWNER_EMAIL || '').trim().toLowerCase();
+      const ownerAdminName = (process.env.ADMIN_OWNER_NAME || 'Agency Owner').trim() || 'Agency Owner';
+      const ownerAdminUsername =
+        ownerAdminName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'owner';
 
       const defaultAdmins: User[] = [
         {
           id: 'user_super_admin_default',
           name: 'Joy Media PR Admin',
           username: 'admin',
-          email: 'admin@joymediapr.com',
+          email: initialAdminEmail,
           role: 'super_admin',
           avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop',
           title: 'Super Administrator',
@@ -1800,12 +1805,15 @@ export async function hydrateStoreFromPostgres() {
           password: defaultAdminPasswordHash,
           sessionVersion: 1,
           knownDevices: []
-        },
-        {
+        }
+      ];
+
+      if (ownerAdminEmail && ownerAdminEmail !== initialAdminEmail) {
+        defaultAdmins.push({
           id: 'user_super_admin_owner',
-          name: 'Nikhil Acharekar',
-          username: 'nikhil',
-          email: 'nikhilacharekar83@gmail.com',
+          name: ownerAdminName,
+          username: ownerAdminUsername,
+          email: ownerAdminEmail,
           role: 'super_admin',
           avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop',
           title: 'Founder & Super Admin',
@@ -1825,8 +1833,8 @@ export async function hydrateStoreFromPostgres() {
           password: defaultAdminPasswordHash,
           sessionVersion: 1,
           knownDevices: []
-        }
-      ];
+        });
+      }
 
       for (const adminUser of defaultAdmins) {
         const existing = await store.getUserByEmail(adminUser.email);

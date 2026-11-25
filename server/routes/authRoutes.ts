@@ -553,7 +553,7 @@ authRouter.get('/admin-setup-status', async (_req: Request, res: Response) => {
     }
     return res.json({
       needsSetup: true,
-      suggestedEmail: unclaimed[0]?.email || 'admin@joymediapr.com'
+      suggestedEmail: unclaimed[0]?.email || (process.env.ADMIN_INITIAL_EMAIL || 'admin@joymediapr.com').trim().toLowerCase()
     });
   } catch {
     return res.json({ needsSetup: false });
@@ -565,7 +565,20 @@ authRouter.post('/admin-setup', rateLimit(10, 15 * 60_000, 'admin_setup'), async
     if ((process.env.ADMIN_INITIAL_PASSWORD || '').trim().length > 0) {
       return res.status(403).json({ error: 'Initial administrator setup is managed via environment configuration.' });
     }
-    const { email, password, confirmPassword } = req.body || {};
+    const { email, password, confirmPassword, setupToken } = req.body || {};
+    if (process.env.NODE_ENV === 'production') {
+      const expectedSetupToken = (process.env.ADMIN_SETUP_TOKEN || '').trim();
+      if (!expectedSetupToken) {
+        console.error('[Auth] Refusing /api/auth/admin-setup in production because ADMIN_SETUP_TOKEN is not set.');
+        return res.status(403).json({ error: 'Initial administrator setup is disabled: ADMIN_SETUP_TOKEN is not configured.' });
+      }
+      const providedToken = typeof setupToken === 'string' ? setupToken.trim() : '';
+      const expectedBuf = Buffer.from(expectedSetupToken, 'utf8');
+      const providedBuf = Buffer.from(providedToken, 'utf8');
+      if (expectedBuf.length !== providedBuf.length || !timingSafeEqual(expectedBuf, providedBuf)) {
+        return res.status(403).json({ error: 'Invalid or missing setup token.' });
+      }
+    }
     if (typeof email !== 'string' || !email.trim() || !isValidEmail(email.trim().toLowerCase())) {
       return res.status(400).json({ error: 'Please provide a valid administrator email address.' });
     }

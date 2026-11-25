@@ -122,7 +122,7 @@ export const CheckoutResultView: React.FC<CheckoutResultViewProps> = ({
           ? ` (${formatUsd(meta.walletApplied)} Account Credit + ${formatUsd(sess.amount)} via ${(sess.gateway || 'gateway').toUpperCase()})`
           : '';
       setContinuationSummary(
-        `Order #${sess.orderId}${meta.title ? ` ("${meta.title}")` : ''} is confirmed and funded in escrow${splitNote}!`
+        `Order #${sess.orderId}${meta.title ? ` ("${meta.title}")` : ''} is paid and confirmed${splitNote}!`
       );
       return;
     }

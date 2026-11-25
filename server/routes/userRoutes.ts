@@ -28,6 +28,7 @@ import { shouldExposeMockCodes } from '../services/mockCodeHelper.js';
 import { canActOnTargetUser } from '../domains/identity/rbac.js';
 import { financialRepository } from '../domains/finance/financial.service.js';
 import { RESERVED_ROUTES } from '../../src/shared/routes.js';
+import { SITE_CONFIG } from '../../src/siteConfig.js';
 
 export const userRouter = Router();
 
@@ -53,6 +54,9 @@ userRouter.get('/users', async (req: Request, res: Response) => {
     if (isStaffUser(caller)) {
       const allUsers = await store.listUsers();
       return res.json(allUsers.map(safeUser));
+    }
+    if (SITE_CONFIG.AGENCY_MODE) {
+      return res.json([]);
     }
     const publicUsers = await store.listPublicUsers();
     res.json(publicUsers.map(sanitizePublicUser));
@@ -415,7 +419,7 @@ userRouter.get('/users/:id', async (req: Request, res: Response) => {
     if (callerId === user.id || isStaff) {
       return res.json(safeUser(user));
     }
-    if (!isUserPublic(user)) {
+    if (SITE_CONFIG.AGENCY_MODE || !isUserPublic(user)) {
       return res.status(404).json({ error: 'User not found' });
     }
     return res.json(sanitizePublicUser(user));

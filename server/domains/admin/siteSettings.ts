@@ -231,6 +231,7 @@ export class SiteSettingsService {
   }
 
   private normalizeCommissionSettings(commission: PlatformCommissionSettings): PlatformCommissionSettings {
+    const defaultPolicy = SITE_CONFIG.AGENCY_MODE ? AGENCY_FEE_CONFIG : DEFAULT_FEE_CONFIG;
     const rawComm = Number(commission.commissionPercent);
     const normalizedCommissionPercent = Number.isFinite(rawComm) && rawComm >= 0 && rawComm <= 100
       ? rawComm
@@ -239,22 +240,22 @@ export class SiteSettingsService {
     const rawBuyerFee = Number(commission.buyerProcessingFeePercent);
     const normalizedBuyerProcessingFeePercent = Number.isFinite(rawBuyerFee) && rawBuyerFee >= 0 && rawBuyerFee <= 100
       ? rawBuyerFee
-      : DEFAULT_FEE_CONFIG.buyerFeePercent;
+      : defaultPolicy.buyerFeePercent;
 
     const rawSmallOrderFee = Number(commission.smallOrderFeeAmount);
     const normalizedSmallOrderFeeAmount = Number.isFinite(rawSmallOrderFee) && rawSmallOrderFee >= 0
       ? rawSmallOrderFee
-      : DEFAULT_FEE_CONFIG.smallOrderFee;
+      : defaultPolicy.smallOrderFee;
 
     const rawSmallOrderThreshold = Number(commission.smallOrderFeeThreshold);
     const normalizedSmallOrderFeeThreshold = Number.isFinite(rawSmallOrderThreshold) && rawSmallOrderThreshold >= 0
       ? rawSmallOrderThreshold
-      : DEFAULT_FEE_CONFIG.smallOrderThreshold;
+      : defaultPolicy.smallOrderThreshold;
 
     const rawMinOrder = Number(commission.minimumOrderAmount);
     const normalizedMinimumOrderAmount = Number.isFinite(rawMinOrder) && rawMinOrder >= 0
       ? rawMinOrder
-      : (DEFAULT_FEE_CONFIG.minimumOrderAmount ?? 5.00);
+      : (defaultPolicy.minimumOrderAmount ?? 5.00);
 
     const cleaned: PlatformCommissionSettings = {
       ...commission,
@@ -445,12 +446,13 @@ export class SiteSettingsService {
   // Pushes every fee rule to the finance ledger, which is what actually enforces them on money movement.
   private syncFeesToLedger() {
     const c = this.settings.commission;
+    const defaultPolicy = SITE_CONFIG.AGENCY_MODE ? AGENCY_FEE_CONFIG : DEFAULT_FEE_CONFIG;
     import('../finance/financeService.js').then(({ financeService }) => {
       financeService.configure({
         commissionPercent: c.commissionPercent,
-        buyerFeePercent: c.buyerProcessingFeePercent ?? DEFAULT_FEE_CONFIG.buyerFeePercent,
-        smallOrderFee: c.smallOrderFeeAmount ?? DEFAULT_FEE_CONFIG.smallOrderFee,
-        smallOrderThreshold: c.smallOrderFeeThreshold ?? DEFAULT_FEE_CONFIG.smallOrderThreshold,
+        buyerFeePercent: c.buyerProcessingFeePercent ?? defaultPolicy.buyerFeePercent,
+        smallOrderFee: c.smallOrderFeeAmount ?? defaultPolicy.smallOrderFee,
+        smallOrderThreshold: c.smallOrderFeeThreshold ?? defaultPolicy.smallOrderThreshold,
         refundClientFeesOnFullRefund: c.refundClientFeesOnFullRefund,
         minimumOrderAmount: c.minimumOrderAmount ?? 5.00
       });

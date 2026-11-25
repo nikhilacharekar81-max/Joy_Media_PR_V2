@@ -2326,13 +2326,22 @@ export default function App({ initialPath = '/', initialData }: AppProps) {
     (pathParts.length === 2 && ['profile', 'freelancer', 'user', 'freelancers'].includes(pathParts[0].toLowerCase()))
   ) {
     const usernameParam = (pathParts.length === 2 ? pathParts[1] : pathParts[0]).toLowerCase();
-    const matchedUser = users.find(
-      u =>
-        (u.username && u.username.toLowerCase() === usernameParam) ||
-        slugify(u.name) === usernameParam ||
-        u.id === usernameParam
-    );
-    if (matchedUser) {
+    const matchesUsernameParam = (u: UserAccount | null | undefined) =>
+      Boolean(
+        u &&
+          ((u.username && u.username.toLowerCase() === usernameParam) ||
+            slugify(u.name) === usernameParam ||
+            u.id.toLowerCase() === usernameParam)
+      );
+    const isStaff = isStaffRole(activeUser?.role);
+    const matchedUser =
+      (matchesUsernameParam(activeUser) ? activeUser : null) ||
+      users.find(u => matchesUsernameParam(u));
+    const canViewProfile =
+      Boolean(matchedUser) &&
+      (!AGENCY_MODE || isStaff || Boolean(activeUser && matchedUser && activeUser.id === matchedUser.id));
+
+    if (canViewProfile && matchedUser) {
       mainContent = (
         <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
           <FreelancerProfileView
@@ -2344,6 +2353,28 @@ export default function App({ initialPath = '/', initialData }: AppProps) {
             onEditProfile={() => navigate('/edit-profile')}
             onContact={(targetId) => handleContactSeller(targetId || matchedUser.id, matchedUser.name, `Consultation with ${matchedUser.name}`)}
           />
+        </div>
+      );
+    } else if (AGENCY_MODE) {
+      mainContent = (
+        <div className="max-w-xl mx-auto py-16 px-4 text-center font-sans">
+          <div className="bg-white rounded-2xl border border-slate-200 p-10 shadow-xs space-y-5">
+            <h1 className="text-2xl font-bold text-slate-900">
+              Page Not Found
+            </h1>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              The profile you are looking for is not available. Browse our agency service catalog instead.
+            </p>
+            <div className="pt-2">
+              <a
+                href="/services"
+                onClick={(e) => navigate('/services', e)}
+                className="inline-flex items-center justify-center px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition cursor-pointer"
+              >
+                Browse Services
+              </a>
+            </div>
+          </div>
         </div>
       );
     }

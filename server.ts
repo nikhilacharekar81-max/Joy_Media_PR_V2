@@ -11,6 +11,7 @@ import { initWebSocketServer } from './server/websocket.js';
 import { runBackgroundJobs, stopBackgroundJobs } from './server/jobs/backgroundJobs.js';
 import { setupSSR, invalidateSsrHtmlCache } from './server/ssr.js';
 import { PRIVATE_ROUTES, RESERVED_ROUTES } from './src/shared/routes.js';
+import { SITE_CONFIG } from './src/siteConfig.js';
 import { slugify } from './src/utils/slugify.js';
 import { postgresStore, assertProductionPostgresConfigured } from './server/db/postgresStore.js';
 import { apiRouter } from './server/routes/index.js';
@@ -321,7 +322,13 @@ try {
       const isLegalRoute = ['/terms', '/privacy', '/refund-policy'].includes(lowerPath);
       const isPrivateRoute =
         pathParts.length > 0 &&
-        (PRIVATE_ROUTES.some(pr => pr.toLowerCase() === firstSeg) || firstSeg === 'post-gig');
+        (PRIVATE_ROUTES.some(pr => pr.toLowerCase() === firstSeg) ||
+          firstSeg === 'post-gig' ||
+          (SITE_CONFIG.AGENCY_MODE &&
+            (firstSeg === 'profile' ||
+              firstSeg === 'freelancer' ||
+              firstSeg === 'user' ||
+              (firstSeg === 'freelancers' && pathParts.length >= 2))));
 
       if (isLegalRoute || isPrivateRoute) {
         return { gigs: [], users: [], projects: [], categories: [] };
@@ -335,7 +342,7 @@ try {
       const isGigDetailRoute =
         (pathParts.length >= 2 && ['services', 'service', 'gig', 'gigs'].includes(firstSeg)) ||
         (pathParts.length === 2 && !RESERVED_ROUTES.includes(firstSeg));
-      const isProfileRoute = pathParts.length === 1 && !RESERVED_ROUTES.includes(firstSeg);
+      const isProfileRoute = !SITE_CONFIG.AGENCY_MODE && pathParts.length === 1 && !RESERVED_ROUTES.includes(firstSeg);
 
       if (
         !isHomeOrGigsRoute &&
@@ -349,7 +356,7 @@ try {
       }
 
       const needGigs = isHomeOrGigsRoute || isFreelancersListRoute || isGigDetailRoute || isProfileRoute;
-      const needUsers = isHomeOrGigsRoute || isFreelancersListRoute || isProfileRoute;
+      const needUsers = SITE_CONFIG.AGENCY_MODE ? false : (isHomeOrGigsRoute || isFreelancersListRoute || isProfileRoute);
       const needProjects = isHomeOrGigsRoute || isProjectsListRoute || isProjectDetailRoute;
       const projectsLimit = isHomeOrGigsRoute ? 8 : 50;
 
@@ -469,15 +476,17 @@ try {
                    AND (moderation_status IS NULL OR moderation_status = 'approved')
                  ORDER BY created_at DESC NULLS LAST LIMIT 50`
               ),
-              pool.query(
-                `SELECT id, name, username, role, avatar, title, rating, reviews_count, hourly_rate, earned, completed_jobs, bio, skills, status, verified, email_verified, mobile_verified, created_at, is_flagged, is_available_now
-                 FROM users
-                 WHERE status = 'active'
-                   AND LOWER(COALESCE(role, 'freelancer')) NOT IN ('admin', 'super_admin', 'support', 'moderator', 'finance_manager', 'staff', 'internal')
-                   AND (is_flagged = FALSE OR is_flagged IS NULL)
-                   AND COALESCE(flag_reason, '') <> 'ACCOUNT_DELETED_BY_ADMIN'
-                 ORDER BY created_at DESC NULLS LAST LIMIT 50`
-              ),
+              SITE_CONFIG.AGENCY_MODE
+                ? Promise.resolve(emptyRows)
+                : pool.query(
+                    `SELECT id, name, username, role, avatar, title, rating, reviews_count, hourly_rate, earned, completed_jobs, bio, skills, status, verified, email_verified, mobile_verified, created_at, is_flagged, is_available_now
+                     FROM users
+                     WHERE status = 'active'
+                       AND LOWER(COALESCE(role, 'freelancer')) NOT IN ('admin', 'super_admin', 'support', 'moderator', 'finance_manager', 'staff', 'internal')
+                       AND (is_flagged = FALSE OR is_flagged IS NULL)
+                       AND COALESCE(flag_reason, '') <> 'ACCOUNT_DELETED_BY_ADMIN'
+                     ORDER BY created_at DESC NULLS LAST LIMIT 50`
+                  ),
               pool.query(
                 `SELECT * FROM projects
                  WHERE status = 'open'
