@@ -18,12 +18,14 @@ import {
   escapeHtml
 } from '../middleware/auth.js';
 import { siteSettings } from '../../src/server/siteSettings.js';
+import { DEFAULT_GIG_IMAGE } from '../../src/constants.js';
 import { financialTransactionService } from '../services/financialService.js';
 import { registerAuditLog } from '../services/orderService.js';
 import { diagnosticService } from '../services/diagnosticService.js';
 import type { Gig } from '../../src/types.js';
 import { SITE_CONFIG } from '../../src/siteConfig.js';
 import { canManageAgencyServices } from '../domains/identity/rbac.js';
+import { invalidateSsrHtmlCache } from '../ssr.js';
 
 export const gigRouter = Router();
 
@@ -178,7 +180,7 @@ gigRouter.post('/gigs', requireAuth, requireActiveStatus, async (req: Request, r
   const category = typeof req.body.category === 'string' ? req.body.category.trim().slice(0, 100) || 'Development & IT' : 'Development & IT';
   const subcategory = typeof req.body.subcategory === 'string' ? req.body.subcategory.trim().slice(0, 100) || 'General' : 'General';
   const rawImage = req.body.image;
-  const defaultImage = 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&h=500&fit=crop';
+  const defaultImage = DEFAULT_GIG_IMAGE;
   const image = (typeof rawImage === 'string' && !/^\s*(javascript:|vbscript:|blob:|data:image\/svg\+xml|data:(?!image\/(?:png|jpe?g|webp|gif);))/i.test(rawImage)) ? rawImage : defaultImage;
   let extras: { id: string; title: string; price: number; deliveryDays: number }[] = [];
   if (Array.isArray(req.body.extras)) {
@@ -234,6 +236,7 @@ gigRouter.post('/gigs', requireAuth, requireActiveStatus, async (req: Request, r
 
   try {
     await store.saveGig(newGig);
+    invalidateSsrHtmlCache();
     res.json(newGig);
   } catch (err) {
     console.error('[CreateGig] Failed to persist to PostgreSQL:', err);
@@ -326,7 +329,7 @@ const handleGigUpdate = async (req: Request, res: Response) => {
       updates.extras = parsedExtras;
     }
     if (req.body.image !== undefined && typeof req.body.image === 'string') {
-      const defaultImage = 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&h=500&fit=crop';
+      const defaultImage = DEFAULT_GIG_IMAGE;
       updates.image = /^\s*(javascript:|vbscript:|blob:|data:image\/svg\+xml|data:(?!image\/(?:png|jpe?g|webp|gif);))/i.test(req.body.image) ? defaultImage : req.body.image;
     }
 
@@ -381,6 +384,7 @@ const handleGigUpdate = async (req: Request, res: Response) => {
       timestamp: new Date().toLocaleString()
     });
 
+    invalidateSsrHtmlCache();
     res.json(updatedGig);
   } catch (err) {
     console.error('[UpdateGig] Error:', err);
@@ -417,6 +421,7 @@ gigRouter.delete('/gigs/:id', requireAuth, requireActiveStatus, async (req: Requ
       timestamp: new Date().toLocaleString()
     });
 
+    invalidateSsrHtmlCache();
     res.json({ success: true, id: g.id });
   } catch (err) {
     console.error('[DeleteGig] Error:', err);

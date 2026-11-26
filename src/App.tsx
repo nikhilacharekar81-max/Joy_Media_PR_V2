@@ -49,10 +49,11 @@ function lazyWithRetry<T extends React.ComponentType<any>>(
   });
 }
 
-// Lazy-load secondary public views, authenticated application modules, and modals so '/' stays lean
-const MarketplaceGigsView = lazyWithRetry(() =>
-  import('./components/marketplace/MarketplaceGigsView').then(m => ({ default: m.MarketplaceGigsView }))
-);
+import { MarketplaceGigsView } from './components/marketplace/MarketplaceGigsView';
+import { GigDetailView } from './components/gigs/GigDetailView';
+import { LegalPage } from './pages/LegalPage';
+
+// Lazy-load secondary private views, authenticated application modules, and modals so '/' stays lean
 const FreelancerSearchView = lazyWithRetry(() =>
   import('./components/marketplace/FreelancerSearchView').then(m => ({ default: m.FreelancerSearchView }))
 );
@@ -62,14 +63,8 @@ const ProjectSearchView = lazyWithRetry(() =>
 const ProjectDetailView = lazyWithRetry(() =>
   import('./components/marketplace/ProjectDetailView').then(m => ({ default: m.ProjectDetailView }))
 );
-const GigDetailView = lazyWithRetry(() =>
-  import('./components/gigs/GigDetailView').then(m => ({ default: m.GigDetailView }))
-);
 const FreelancerProfileView = lazyWithRetry(() =>
   import('./components/profile/FreelancerProfileView').then(m => ({ default: m.FreelancerProfileView }))
-);
-const LegalPage = lazyWithRetry(() =>
-  import('./pages/LegalPage').then(m => ({ default: m.LegalPage }))
 );
 const BuyerActivityView = lazyWithRetry(() =>
   import('./components/marketplace/BuyerActivityView').then(m => ({ default: m.BuyerActivityView }))
@@ -749,8 +744,9 @@ export default function App({ initialPath = '/', initialData }: AppProps) {
         body: JSON.stringify({
           name: signupName,
           email: signupEmail,
-          mobile: signupMobile,
-          password: signupPassword
+          ...(signupMobile.trim() ? { mobile: signupMobile.trim() } : {}),
+          password: signupPassword,
+          confirmPassword: signupConfirmPassword
         })
       });
       const data = await res.json();
@@ -1082,7 +1078,7 @@ export default function App({ initialPath = '/', initialData }: AppProps) {
 
       try {
         let token = getAuthToken();
-        const isPrivileged = ['admin', 'super_admin', 'support'].includes(activeUser.role || '');
+        const isPrivileged = isStaffRole(activeUser.role);
         if (!token && !isPrivileged) {
           const session = await requestDemoSession(activeUser.id);
           if (session?.token) {
@@ -1281,7 +1277,7 @@ export default function App({ initialPath = '/', initialData }: AppProps) {
 
       try {
         let token = getAuthToken();
-        const isPrivileged = ['admin', 'super_admin', 'support'].includes(activeUser.role || '');
+        const isPrivileged = isStaffRole(activeUser.role);
         if (!token && !isPrivileged) {
           const session = await requestDemoSession(activeUser.id);
           if (session?.token) {
@@ -1642,7 +1638,7 @@ export default function App({ initialPath = '/', initialData }: AppProps) {
   const isBuyerOnlyUser = Boolean(
     activeUser &&
     activeUser.role === 'buyer' &&
-    !['admin', 'super_admin', 'support'].includes(activeUser.role)
+    !isStaffRole(activeUser.role)
   );
 
   // Buyers can strictly only see their own projects

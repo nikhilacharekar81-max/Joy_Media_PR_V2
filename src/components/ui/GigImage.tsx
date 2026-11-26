@@ -55,14 +55,24 @@ export const GigImage: React.FC<GigImageProps> = ({
   };
 
   const theme = getCategoryTheme(category);
-  const isUserUpload = src && (src.startsWith('blob:') || src.startsWith('data:') || src.startsWith('/uploads/'));
+  const isCustomImage = Boolean(
+    src &&
+    !src.startsWith('data:image/svg+xml') &&
+    (src.startsWith('blob:') ||
+      src.startsWith('data:image/') ||
+      src.startsWith('/uploads/') ||
+      src.startsWith('/api/uploads/') ||
+      src.startsWith('https://'))
+  );
 
-  if (isUserUpload && !hasError) {
+  if (isCustomImage && !hasError) {
     return (
       <div className={`relative overflow-hidden bg-slate-900 ${className}`}>
         <img
-          src={src}
+          src={src!}
           alt={title}
+          loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover"
           onError={() => setHasError(true)}
         />

@@ -72,7 +72,7 @@ import {
   retryPayout,
   formatPayoutRow
 } from './payout.service.js';
-import { DEFAULT_FEE_CONFIG, calculateOrderFees, quoteOrderWithLiveSettings, toCents } from './fees.js';
+import { DEFAULT_FEE_CONFIG, DEFAULT_FEE_POLICY, calculateOrderFees, quoteOrderWithLiveSettings, toCents } from './fees.js';
 
 let checkoutSchemaInitialized = false;
 export async function ensurePaymentCheckoutSchema(pool: any): Promise<void> {
@@ -144,11 +144,11 @@ router.get(['/fees/quote', '/payments/quote'], async (req: Request, res: Respons
     res.json({
       ...q,
       config: {
-        commissionPercent: q.commissionPercent ?? DEFAULT_FEE_CONFIG.commissionPercent,
-        buyerFeePercent: q.buyerFeePercent ?? DEFAULT_FEE_CONFIG.buyerFeePercent,
+        commissionPercent: q.commissionPercent ?? DEFAULT_FEE_POLICY.commissionPercent,
+        buyerFeePercent: q.buyerFeePercent ?? DEFAULT_FEE_POLICY.buyerFeePercent,
         smallOrderFee: q.smallOrderFee,
-        smallOrderThreshold: activeSettings.commission?.smallOrderFeeThreshold ?? DEFAULT_FEE_CONFIG.smallOrderThreshold,
-        minimumOrderAmount: activeSettings.commission?.minimumOrderAmount ?? (DEFAULT_FEE_CONFIG.minimumOrderAmount ?? 5.00)
+        smallOrderThreshold: activeSettings.commission?.smallOrderFeeThreshold ?? DEFAULT_FEE_POLICY.smallOrderThreshold,
+        minimumOrderAmount: activeSettings.commission?.minimumOrderAmount ?? (DEFAULT_FEE_POLICY.minimumOrderAmount ?? 5.00)
       }
     });
   } catch (err: any) {
@@ -164,14 +164,14 @@ router.get('/fees/config', async (_req: Request, res: Response) => {
     const market = settings.marketplace;
     res.json({
       success: true,
-      commissionPercent: comm?.commissionPercent ?? DEFAULT_FEE_CONFIG.commissionPercent,
-      buyerFeePercent: comm?.buyerProcessingFeePercent ?? DEFAULT_FEE_CONFIG.buyerFeePercent,
-      clientServiceFee: comm?.buyerProcessingFeePercent ?? DEFAULT_FEE_CONFIG.buyerFeePercent,
-      smallOrderFee: comm?.smallOrderFeeAmount ?? DEFAULT_FEE_CONFIG.smallOrderFee,
-      smallOrderFeeAmount: comm?.smallOrderFeeAmount ?? DEFAULT_FEE_CONFIG.smallOrderFee,
-      smallOrderFeeThreshold: comm?.smallOrderFeeThreshold ?? DEFAULT_FEE_CONFIG.smallOrderThreshold,
-      smallOrderThreshold: comm?.smallOrderFeeThreshold ?? DEFAULT_FEE_CONFIG.smallOrderThreshold,
-      minimumOrderAmount: comm?.minimumOrderAmount ?? (DEFAULT_FEE_CONFIG.minimumOrderAmount ?? 5.00),
+      commissionPercent: comm?.commissionPercent ?? DEFAULT_FEE_POLICY.commissionPercent,
+      buyerFeePercent: comm?.buyerProcessingFeePercent ?? DEFAULT_FEE_POLICY.buyerFeePercent,
+      clientServiceFee: comm?.buyerProcessingFeePercent ?? DEFAULT_FEE_POLICY.buyerFeePercent,
+      smallOrderFee: comm?.smallOrderFeeAmount ?? DEFAULT_FEE_POLICY.smallOrderFee,
+      smallOrderFeeAmount: comm?.smallOrderFeeAmount ?? DEFAULT_FEE_POLICY.smallOrderFee,
+      smallOrderFeeThreshold: comm?.smallOrderFeeThreshold ?? DEFAULT_FEE_POLICY.smallOrderThreshold,
+      smallOrderThreshold: comm?.smallOrderFeeThreshold ?? DEFAULT_FEE_POLICY.smallOrderThreshold,
+      minimumOrderAmount: comm?.minimumOrderAmount ?? (DEFAULT_FEE_POLICY.minimumOrderAmount ?? 5.00),
       minimumGigPrice: market?.minimumGigPrice ?? 5.00,
       maximumGigPrice: market?.maximumGigPrice ?? 10000.00,
       minimumProjectBudget: market?.minimumProjectBudget ?? 5.00,
@@ -387,7 +387,7 @@ router.post('/checkout/start', requireAuth, requireFinancialActiveStatus, rateLi
         : String(resolved.gig.title || 'Service Order');
       selectedExtrasDetails = resolved.selectedExtrasDetails || [];
       deliveryDays = Math.max(1, Math.min(365, resolved.totalDeliveryDays || 7));
-      feeBreakdown = await quoteOrderWithLiveSettings(baseOrderAmount).catch(() => calculateOrderFees(baseOrderAmount));
+      feeBreakdown = await quoteOrderWithLiveSettings(baseOrderAmount).catch(() => calculateOrderFees(baseOrderAmount, DEFAULT_FEE_POLICY));
     }
 
     const orderTotal = Number((feeBreakdown?.clientTotal ?? baseOrderAmount).toFixed(2));
@@ -620,7 +620,7 @@ router.get('/disputes', requireAuth, async (req: Request, res: Response) => {
     const pool = postgresStore.getPool();
     const callerRes = await pool.query('SELECT role FROM users WHERE id = $1', [authUserId]);
     const caller = callerRes.rows[0];
-    const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin' || caller?.role === 'support';
+    const isAdmin = isStaffUser(caller);
 
     let result;
     if (isAdmin) {
@@ -646,7 +646,7 @@ router.get('/refunds', requireAuth, async (req: Request, res: Response) => {
     const pool = postgresStore.getPool();
     const callerRes = await pool.query('SELECT role FROM users WHERE id = $1', [authUserId]);
     const caller = callerRes.rows[0];
-    const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin' || caller?.role === 'support';
+    const isAdmin = isStaffUser(caller);
 
     let result;
     if (isAdmin) {
@@ -697,7 +697,7 @@ router.get('/payments/user/:userId', requireAuth, async (req: Request, res: Resp
     const authUserId = (req as any).authenticatedUserId;
     const targetUserId = req.params.userId;
     const caller = await store.getUser(authUserId);
-    const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin';
+    const isAdmin = isStaffUser(caller);
     if (!isAdmin && authUserId !== targetUserId) {
       return res.status(403).json({ error: 'Forbidden: Access to another user financial snapshot is not allowed.' });
     }
@@ -728,10 +728,10 @@ router.get('/payments/user/:userId', requireAuth, async (req: Request, res: Resp
     const commSettings = currentSettings?.commission;
     const walletSettings = currentSettings?.wallets;
     const clearingPeriodDays = Number(commSettings?.escrowProtectionDays ?? 14) || 14;
-    const commissionPercent = Number(commSettings?.commissionPercent ?? 20);
-    const buyerFeePercent = Number(commSettings?.buyerProcessingFeePercent ?? 1);
-    const smallOrderFeeAmount = Number(commSettings?.smallOrderFeeAmount ?? 1);
-    const smallOrderFeeThreshold = Number(commSettings?.smallOrderFeeThreshold ?? 200);
+    const commissionPercent = Number(commSettings?.commissionPercent ?? DEFAULT_FEE_POLICY.commissionPercent);
+    const buyerFeePercent = Number(commSettings?.buyerProcessingFeePercent ?? DEFAULT_FEE_POLICY.buyerFeePercent);
+    const smallOrderFeeAmount = Number(commSettings?.smallOrderFeeAmount ?? DEFAULT_FEE_POLICY.smallOrderFee);
+    const smallOrderFeeThreshold = Number(commSettings?.smallOrderFeeThreshold ?? DEFAULT_FEE_POLICY.smallOrderThreshold);
     const minimumWithdrawalAmount = Number(walletSettings?.minimumWithdrawalAmount ?? 3);
     const maximumWithdrawalPerTransaction = Number(walletSettings?.maximumWithdrawalPerTransaction ?? 5000);
     const dailyWithdrawalLimit = Number(walletSettings?.dailyWithdrawalLimit ?? 10000);
@@ -1168,7 +1168,7 @@ router.post('/payments/escrow/deposit', requireAuth, requireFinancialActiveStatu
         dueDate: new Date(Date.now() + 7 * 86400000).toISOString(),
         escrowProtectionStartDate: today,
         escrowProtectionEndDate: protectionEnd,
-        feeBreakdown: calculateOrderFees(amount),
+        feeBreakdown: calculateOrderFees(amount, DEFAULT_FEE_POLICY),
         projectId: order.projectId,
         gigId: order.gigId
       };
@@ -1458,10 +1458,14 @@ router.post('/payments/gateway/checkout', requireAuth, requireFinancialActiveSta
         }
 
         const activePayPalOrderId = activeSess.paypal_order_id || activeSess.provider_tx_id;
-        if (sameReturnAction && activePayPalOrderId && activeSess.status !== 'reserving' && !String(activePayPalOrderId).startsWith('sess_sim_')) {
-          const activeCheckoutUrl = activeSess.gateway === 'paypal'
+        const storedCheckoutUrl = typeof activeMeta?.providerCheckoutUrl === 'string' && activeMeta.providerCheckoutUrl.trim()
+          ? activeMeta.providerCheckoutUrl.trim()
+          : null;
+        const canReuseUrl = activeSess.gateway === 'paypal' || Boolean(storedCheckoutUrl);
+        if (sameReturnAction && activePayPalOrderId && canReuseUrl && activeSess.status !== 'reserving' && !String(activePayPalOrderId).startsWith('sess_sim_')) {
+          const activeCheckoutUrl = storedCheckoutUrl || (activeSess.gateway === 'paypal'
             ? `https://www.${activeSess.environment === 'sandbox' ? 'sandbox.' : ''}paypal.com/checkoutnow?token=${activePayPalOrderId}`
-            : `/checkout/pay?session_id=${encodeURIComponent(activeSess.id)}`;
+            : `/checkout/pay?session_id=${encodeURIComponent(activeSess.id)}`);
 
           return {
             reused: true,
@@ -1544,16 +1548,17 @@ router.post('/payments/gateway/checkout', requireAuth, requireFinancialActiveSta
 
     const paypalOrderId = normalizedGateway === 'paypal' ? providerSession.providerSessionId : null;
 
-    // STEP 3: Attach provider order ID to reservation in a SHORT DB transaction
+    // STEP 3: Attach provider order ID & hosted checkout URL to reservation in a SHORT DB transaction
     await postgresStore.executeInTransaction(async (client) => {
       await client.query(
         `UPDATE payment_checkout_sessions
             SET status = 'pending',
                 provider_tx_id = $1::text,
                 paypal_order_id = $2::text,
+                metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('providerCheckoutUrl', $3::text),
                 updated_at = NOW()
-          WHERE id = $3::text`,
-        [providerSession.providerSessionId, paypalOrderId, reservationCheckoutId]
+          WHERE id = $4::text`,
+        [providerSession.providerSessionId, paypalOrderId, providerSession.checkoutUrl || '', reservationCheckoutId]
       );
     });
 
@@ -1671,17 +1676,9 @@ export async function settleCompletedCheckoutSession(params: {
       [effectiveTxId, sess.id]
     );
     if (existingTx.rows.length > 0) {
-      return {
-        received: true,
-        replayed: true,
-        checkoutId: String(sess.id),
-        orderId: sess.order_id ? String(sess.order_id) : null,
-        purpose: String(sess.purpose || 'deposit'),
-        amount: Number(sess.expected_amount),
-        currency: String(sess.currency || 'USD'),
-        paypalOrderId: sess.paypal_order_id || paypalOrderId || null,
-        captureId: effectiveTxId,
-        metadata: parsedMeta
+      throw {
+        status: 409,
+        message: 'This payment provider transaction ID has already been applied to another checkout session.'
       };
     }
 
@@ -2504,6 +2501,116 @@ export const handlePaymentWebhook = async (req: Request, res: Response) => {
     }
   }
 
+  // Handle Stripe & Razorpay refund / chargeback / dispute lifecycle events
+  const isStripeRefundOrDispute =
+    gateway === 'stripe' && (rawEvent === 'charge.refunded' || rawEvent === 'charge.dispute.created');
+  const isRazorpayRefundOrDispute =
+    gateway === 'razorpay' && (rawEvent === 'refund.processed' || rawEvent === 'payment.dispute.created');
+
+  if (isStripeRefundOrDispute || isRazorpayRefundOrDispute) {
+    const obj = isStripeRefundOrDispute
+      ? (payload?.data?.object || {})
+      : (payload?.payload?.refund?.entity || payload?.payload?.dispute?.entity || payload?.payload?.payment?.entity || {});
+    const refId = String(obj?.id || '').trim();
+    const lookupSessionId = String(
+      obj?.metadata?.checkoutId ||
+      obj?.notes?.checkoutId ||
+      payload?.payload?.payment?.entity?.notes?.checkoutId ||
+      ''
+    ).trim();
+    const lookupProviderId = String(
+      obj?.payment_intent ||
+      obj?.charge ||
+      obj?.payment_id ||
+      payload?.payload?.payment?.entity?.id ||
+      refId
+    ).trim();
+    const rawRevCents = Number(
+      obj?.amount_refunded ??
+      obj?.amount ??
+      0
+    );
+
+    let sessRow: any = null;
+    try {
+      const findRes = await pool.query(
+        `SELECT * FROM payment_checkout_sessions
+          WHERE gateway = $1
+            AND (id = $2::text OR provider_tx_id = $3::text OR provider_tx_id = $4::text)
+          LIMIT 1`,
+        [gateway, lookupSessionId || '__none__', lookupProviderId || '__none__', refId || '__none__']
+      );
+      sessRow = findRes.rows[0] || null;
+    } catch {}
+
+    if (sessRow && (sessRow.status === 'completed' || sessRow.status === 'partially_refunded')) {
+      const revAmountDollars = Number.isFinite(rawRevCents) && rawRevCents > 0
+        ? Number((rawRevCents / 100).toFixed(2))
+        : Number(sessRow.expected_amount);
+
+      await postgresStore.executeInTransaction(async (client) => {
+        const lockedSessRes = await client.query(
+          'SELECT * FROM payment_checkout_sessions WHERE id = $1 FOR UPDATE',
+          [sessRow.id]
+        );
+        const lockedSess = lockedSessRes.rows[0];
+        if (!lockedSess || !['completed', 'partially_refunded'].includes(lockedSess.status)) return;
+
+        const existingMeta = typeof lockedSess.metadata === 'string'
+          ? (() => { try { return JSON.parse(lockedSess.metadata); } catch { return {}; } })()
+          : (lockedSess.metadata || {});
+        const prevRefundedCents = toCents(Number(existingMeta.refundedAmount || 0));
+        const expectedCents = toCents(Number(lockedSess.expected_amount || 0));
+        const remainingCents = Math.max(0, expectedCents - prevRefundedCents);
+        const appliedRevCents = Math.min(toCents(revAmountDollars), remainingCents > 0 ? remainingCents : toCents(revAmountDollars));
+        const totalRefundedCents = prevRefundedCents + appliedRevCents;
+        const nextStatus = totalRefundedCents >= expectedCents ? 'refunded' : 'partially_refunded';
+        const nextMeta = {
+          ...existingMeta,
+          refundedAmount: Number((totalRefundedCents / 100).toFixed(2)),
+          lastRefundReference: refId || lookupProviderId || lockedSess.id,
+          lastWebhookEventType: rawEvent
+        };
+
+        if (lockedSess.order_id) {
+          const ordLockRes = await client.query('SELECT id, status FROM orders WHERE id = $1 FOR UPDATE', [lockedSess.order_id]).catch(() => ({ rows: [] }));
+          const linkedOrd = ordLockRes.rows[0];
+          if (linkedOrd && ['funded_in_escrow', 'in_progress', 'delivered', 'revision_requested'].includes(linkedOrd.status)) {
+            await client.query(
+              "UPDATE orders SET status = 'disputed', previous_status = $1, updated_at = NOW() WHERE id = $2",
+              [linkedOrd.status, linkedOrd.id]
+            ).catch(() => {});
+          }
+        }
+
+        await client.query(
+          `UPDATE payment_checkout_sessions
+              SET status = $1,
+                  metadata = $2::jsonb,
+                  last_webhook_event_id = COALESCE($3, last_webhook_event_id),
+                  updated_at = NOW()
+            WHERE id = $4`,
+          [nextStatus, JSON.stringify(nextMeta), webhookEventId || null, lockedSess.id]
+        ).catch(async () => {
+          await client.query('UPDATE payment_checkout_sessions SET status = $1 WHERE id = $2', [nextStatus, lockedSess.id]);
+        });
+
+        if (appliedRevCents > 0) {
+          await financialTransactionService.reverseGatewayDeposit({
+            userId: String(lockedSess.user_id),
+            amount: Number((appliedRevCents / 100).toFixed(2)),
+            reference: refId || lookupProviderId || lockedSess.id,
+            idempotencyKey: `WH-REFUND-${gateway.toUpperCase()}-${lockedSess.id}-${refId || lookupProviderId}`
+          }, client);
+        }
+      });
+      await syncUserBalances([String(sessRow.user_id)]);
+    }
+
+    await markWebhookEvent('processed', sessRow?.id || null);
+    return res.json({ received: true, status: rawEvent.includes('dispute') ? 'disputed' : 'refunded' });
+  }
+
   const creditingEvents = [
     'payment.succeeded',
     'checkout.session.completed',
@@ -3040,7 +3147,7 @@ router.get('/payments/invoices/:userId', requireAuth, async (req: Request, res: 
     const pool = postgresStore.getPool();
     const callerRes = await pool.query('SELECT role FROM users WHERE id = $1', [authUserId]);
     const caller = callerRes.rows[0];
-    const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin';
+    const isAdmin = isStaffUser(caller);
     if (!isAdmin && authUserId !== targetUserId) {
       return res.status(403).json({ error: 'Forbidden: Access to another user invoices is not allowed.' });
     }
@@ -3076,7 +3183,7 @@ router.get('/payments/invoices/:userId', requireAuth, async (req: Request, res: 
 
       const quote = (o.feeBreakdown as any)?.clientTotal !== undefined
         ? (o.feeBreakdown as any)
-        : await quoteOrderWithLiveSettings(o.amount).catch(() => calculateOrderFees(o.amount));
+        : await quoteOrderWithLiveSettings(o.amount).catch(() => calculateOrderFees(o.amount, DEFAULT_FEE_POLICY));
 
       const isPaid = Boolean((escRow && (escRow.status === 'released' || escRow.status === 'split' || releasedGross > 0)) || netEarned > 0);
       const isRefunded = !isPaid && Boolean(escRow && (escRow.status === 'refunded' || refundedGross > 0));
@@ -3585,7 +3692,7 @@ router.post('/admin/finance/reset-clean', requireRole(['super_admin']), async (r
   }
 });
 
-router.get('/admin/finance/overview', requireRole(['admin', 'super_admin']), async (req: Request, res: Response) => {
+router.get('/admin/finance/overview', requireAdmin, async (req: Request, res: Response) => {
   try {
     const overview = await financialRepository.getFinancialOverview();
     res.json(overview);
@@ -3728,7 +3835,7 @@ router.get('/admin/finance/escrow', requireAdmin, async (req: Request, res: Resp
 
       const esc = escrowMap.get(o.id);
       const fbComm = (o.feeBreakdown as any)?.commissionPercent;
-      const liveCommRate = siteSettings.getSettings()?.commission?.commissionPercent ?? DEFAULT_FEE_CONFIG.commissionPercent;
+      const liveCommRate = siteSettings.getSettings()?.commission?.commissionPercent ?? DEFAULT_FEE_POLICY.commissionPercent;
       const effectiveCommRate = (esc?.commissionPercent !== undefined && esc?.commissionPercent !== null)
         ? Number(esc.commissionPercent)
         : (fbComm !== undefined && fbComm !== null ? Number(fbComm) : liveCommRate);

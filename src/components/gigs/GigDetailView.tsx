@@ -179,7 +179,7 @@ export const GigDetailView: React.FC<GigDetailViewProps> = ({
           <div className="bg-slate-900 rounded-3xl overflow-hidden border border-slate-800 shadow-xl relative group">
             {isPuppetVideoPlaying ? (
               <div className="relative aspect-video bg-black flex flex-col items-center justify-center text-white p-6">
-                <div className="absolute inset-0 bg-cover bg-center opacity-40" style={{ backgroundImage: `url('https://images.unsplash.com/photo-1536240478700-b869070f9279?w=1200&h=700&fit=crop')` }}></div>
+                <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-emerald-950/60 to-slate-950 opacity-80"></div>
                 <div className="relative z-10 text-center space-y-4">
                   <div className="w-16 h-16 rounded-full bg-emerald-600/90 text-white flex items-center justify-center mx-auto shadow-lg animate-pulse">
                     <Sparkles className="w-8 h-8" />

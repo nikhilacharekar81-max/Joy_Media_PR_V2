@@ -663,11 +663,11 @@ projectRouter.patch('/admin/projects/:id/status', requireAdmin, async (req: Requ
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor: adminActor(req),
-      role: 'super_admin',
+      role: (req as any).authenticatedUser?.role || 'admin',
       action: `PROJECT_STATUS_${String(newStatus).toUpperCase()}`,
       target: `Project "${p.title}"`,
       details: `Admin changed status from "${oldStatus}" to "${newStatus}"`,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     res.json(p);
@@ -687,11 +687,11 @@ projectRouter.patch('/admin/projects/:id/feature', requireAdmin, async (req: Req
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor: adminActor(req),
-      role: 'super_admin',
+      role: (req as any).authenticatedUser?.role || 'admin',
       action: p.featured ? 'ADMIN_PROJECT_FEATURED' : 'ADMIN_PROJECT_UNFEATURED',
       target: `Project "${p.title}"`,
       details: `Admin toggled featured status to ${p.featured}`,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     res.json(p);
@@ -719,11 +719,11 @@ projectRouter.delete('/admin/projects/:id', requireAdmin, async (req: Request, r
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor: adminActor(req),
-      role: 'super_admin',
+      role: (req as any).authenticatedUser?.role || 'admin',
       action: 'ADMIN_PROJECT_DELETED',
       target: `Project "${deleted.title}"`,
       details: `Admin removed project #${deleted.id}`,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     res.json({ success: true, id: deleted.id });

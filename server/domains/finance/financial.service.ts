@@ -10,6 +10,7 @@ import {
   resolveEffectiveFeePolicy,
   quoteOrderWithLiveSettings,
   DEFAULT_FEE_CONFIG,
+  DEFAULT_FEE_POLICY,
   toCents,
   percentOfCents
 } from './fees.js';
@@ -203,7 +204,7 @@ export class FinancialRepository {
       releaseSeq: Number(r.release_seq || 0),
       status: r.status,
       fundedAt: r.funded_at ? new Date(r.funded_at).toISOString() : new Date().toISOString(),
-      commissionPercent: (r.commission_percent !== null && r.commission_percent !== undefined) ? Number(r.commission_percent) : 20,
+      commissionPercent: (r.commission_percent !== null && r.commission_percent !== undefined) ? Number(r.commission_percent) : DEFAULT_FEE_POLICY.commissionPercent,
       serviceFee: Number(r.service_fee || 0),
       smallOrderFee: Number(r.small_order_fee || 0),
       feesRefunded: Boolean(r.fees_refunded)
@@ -969,11 +970,11 @@ export class FinancialTransactionService {
         const { siteSettings } = await import('../admin/siteSettings.js');
         const comm = siteSettings.getSettings().commission;
         const livePolicy = {
-          commissionPercent: comm.commissionPercent ?? DEFAULT_FEE_CONFIG.commissionPercent,
-          buyerFeePercent: comm.buyerProcessingFeePercent ?? DEFAULT_FEE_CONFIG.buyerFeePercent,
-          smallOrderFee: comm.smallOrderFeeAmount ?? DEFAULT_FEE_CONFIG.smallOrderFee,
-          smallOrderThreshold: comm.smallOrderFeeThreshold ?? DEFAULT_FEE_CONFIG.smallOrderThreshold,
-          minimumOrderAmount: comm.minimumOrderAmount ?? (DEFAULT_FEE_CONFIG.minimumOrderAmount ?? 5.00)
+          commissionPercent: comm.commissionPercent ?? DEFAULT_FEE_POLICY.commissionPercent,
+          buyerFeePercent: comm.buyerProcessingFeePercent ?? DEFAULT_FEE_POLICY.buyerFeePercent,
+          smallOrderFee: comm.smallOrderFeeAmount ?? DEFAULT_FEE_POLICY.smallOrderFee,
+          smallOrderThreshold: comm.smallOrderFeeThreshold ?? DEFAULT_FEE_POLICY.smallOrderThreshold,
+          minimumOrderAmount: comm.minimumOrderAmount ?? (DEFAULT_FEE_POLICY.minimumOrderAmount ?? 5.00)
         };
         const calculated = calculateOrderFees(gigPrice, livePolicy);
         serviceFee = calculated.serviceFee;

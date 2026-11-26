@@ -1,6 +1,7 @@
 import React from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { UserAccount, Gig, Project, Proposal, Order, Review, SupportTicket, isStaffRole } from '../../types';
+import { DEFAULT_AVATAR } from '../../constants';
 
 interface InspectUserModalProps {
   inspectingUser: UserAccount | null;
@@ -36,10 +37,10 @@ export const InspectUserModal: React.FC<InspectUserModalProps> = ({
         <div className="flex items-start justify-between pb-4 border-b border-slate-100">
           <div className="flex items-center gap-4">
             <img 
-              src={inspectingUser.avatar} 
+              src={inspectingUser.avatar || DEFAULT_AVATAR} 
               className="w-14 h-14 rounded-full object-cover ring-2 ring-emerald-500/30" 
               alt={inspectingUser.name} 
-              onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'; }}
+              onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
             />
             <div>
               <div className="flex items-center gap-2">

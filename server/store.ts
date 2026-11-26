@@ -21,6 +21,7 @@ import {
 } from './db/postgresStore.js';
 import { financialRepository, financialTransactionService } from './services/financialService.js';
 import { calculateOrderFees } from './domains/finance/fees.js';
+import { DEFAULT_AVATAR, DEFAULT_GIG_IMAGE } from '../src/constants.js';
 
 export { financeLedger, siteSettings, DEFAULT_SITE_SETTINGS, FinanceLedgerEngine, postgresStore, isPostgresEnabled };
 
@@ -360,7 +361,7 @@ export function mapGigRow(r: any): Gig {
     freelancerId: r.freelancer_id,
     freelancerName: r.freelancer_name,
     freelancerUsername: r.freelancer_username || r.freelancer_name?.toLowerCase().replace(/\s+/g, '_') || undefined,
-    freelancerAvatar: r.freelancer_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    freelancerAvatar: r.freelancer_avatar || DEFAULT_AVATAR,
     freelancerLevel: r.freelancer_level || 'Level 1 ★',
     title: unescapeHtml(r.title),
     slug: r.slug || r.title?.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '') || undefined,
@@ -371,7 +372,7 @@ export function mapGigRow(r: any): Gig {
     deliveryDays: Number(r.delivery_days || 7),
     rating: Number(r.rating || 0),
     reviewsCount: Number(r.reviews_count || 0),
-    image: r.image || 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&h=500&fit=crop',
+    image: r.image || DEFAULT_GIG_IMAGE,
     coverImage: r.cover_image || undefined,
     gallery: safeJsonParse(r.gallery, []),
     tags: safeJsonParse(r.tags, []),
@@ -399,7 +400,7 @@ export function mapProjectRow(r: any): Project {
     id: r.id,
     buyerId: r.buyer_id,
     buyerName: r.buyer_name,
-    buyerAvatar: r.buyer_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+    buyerAvatar: r.buyer_avatar || DEFAULT_AVATAR,
     title: r.title,
     slug: r.slug || undefined,
     category: r.category,
@@ -1787,7 +1788,7 @@ export async function hydrateStoreFromPostgres() {
           username: 'admin',
           email: initialAdminEmail,
           role: 'super_admin',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=200&h=200&fit=crop',
+          avatar: DEFAULT_AVATAR,
           title: 'Super Administrator',
           rating: 5.0,
           reviewsCount: 0,
@@ -1815,7 +1816,7 @@ export async function hydrateStoreFromPostgres() {
           username: ownerAdminUsername,
           email: ownerAdminEmail,
           role: 'super_admin',
-          avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200&h=200&fit=crop',
+          avatar: DEFAULT_AVATAR,
           title: 'Founder & Super Admin',
           rating: 5.0,
           reviewsCount: 0,

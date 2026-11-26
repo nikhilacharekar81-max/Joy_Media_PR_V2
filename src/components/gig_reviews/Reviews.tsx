@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Star, CheckCircle2, MessageSquare, CornerDownRight } from 'lucide-react';
 import { Gig, Review, UserAccount, Order } from '../../types';
 import { getAuthToken } from '../../utils/authToken';
-import { RATINGS_ENABLED } from '../../constants';
+import { RATINGS_ENABLED, DEFAULT_AVATAR } from '../../constants';
 
 interface ReviewsProps {
   currentGig?: Gig;
@@ -157,8 +157,10 @@ export const Reviews: React.FC<ReviewsProps> = ({
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <img 
-                        src={rev.reviewerAvatar || rev.buyerAvatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop'} 
+                        src={rev.reviewerAvatar || rev.buyerAvatar || DEFAULT_AVATAR} 
                         alt={rev.reviewerName || rev.buyerName || 'Buyer'} 
+                        loading="lazy"
+                        decoding="async"
                         className="w-9 h-9 rounded-full object-cover border border-slate-200"
                       />
                       <div>

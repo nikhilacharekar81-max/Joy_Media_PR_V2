@@ -18,6 +18,7 @@ import {
   recordUserEmail
 } from './notificationService.js';
 import { siteSettings } from '../domains/admin/siteSettings.js';
+import { SITE_CONFIG } from '../../src/siteConfig.js';
 
 const LOGIN_LOCKOUT_WINDOW_MS = 15 * 60 * 1000;
 const inMemoryLoginAttempts = new Map<string, { attempts: number; expiresAt: number }>();
@@ -421,9 +422,11 @@ export async function handleLogin(req: Request, res: Response) {
   const isPlaceholderDevice = deviceId === 'dev_default_session' || deviceId === 'unknown';
   const trustedDevice = user.knownDevices.includes(deviceId) && !(isAdminRole && isPlaceholderDevice);
   const devBypass = !IS_PRODUCTION && !isAdminRole && (isPlaceholderDevice || Boolean(req.body?.skipDeviceVerification));
-  const requiresVerification = isAdminRole
-    ? !trustedDevice
-    : (USER_DEVICE_VERIFICATION && !trustedDevice && !devBypass);
+  const requiresVerification = SITE_CONFIG.AGENCY_MODE
+    ? false
+    : (isAdminRole
+        ? !trustedDevice
+        : (USER_DEVICE_VERIFICATION && !trustedDevice && !devBypass));
 
   if (requiresVerification) {
     const userEmailKey = (user.email || lookupEmail || user.id).toLowerCase();

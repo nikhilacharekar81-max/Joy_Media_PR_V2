@@ -9,9 +9,10 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { initWebSocketServer } from './server/websocket.js';
 import { runBackgroundJobs, stopBackgroundJobs } from './server/jobs/backgroundJobs.js';
-import { setupSSR, invalidateSsrHtmlCache } from './server/ssr.js';
+import { setupSSR, invalidateSsrHtmlCache, prewarmSsrRoutes } from './server/ssr.js';
 import { PRIVATE_ROUTES, RESERVED_ROUTES } from './src/shared/routes.js';
 import { SITE_CONFIG } from './src/siteConfig.js';
+import { DEFAULT_AVATAR, DEFAULT_GIG_IMAGE } from './src/constants.js';
 import { slugify } from './src/utils/slugify.js';
 import { postgresStore, assertProductionPostgresConfigured } from './server/db/postgresStore.js';
 import { apiRouter } from './server/routes/index.js';
@@ -357,7 +358,7 @@ try {
 
       const needGigs = isHomeOrGigsRoute || isFreelancersListRoute || isGigDetailRoute || isProfileRoute;
       const needUsers = SITE_CONFIG.AGENCY_MODE ? false : (isHomeOrGigsRoute || isFreelancersListRoute || isProfileRoute);
-      const needProjects = isHomeOrGigsRoute || isProjectsListRoute || isProjectDetailRoute;
+      const needProjects = SITE_CONFIG.AGENCY_MODE ? false : (isHomeOrGigsRoute || isProjectsListRoute || isProjectDetailRoute);
       const projectsLimit = isHomeOrGigsRoute ? 8 : 50;
 
       if (!isStoreHydrated && process.env.NODE_ENV !== 'test') {
@@ -388,7 +389,7 @@ try {
         freelancerId: r.freelancer_id,
         freelancerName: r.freelancer_name,
         freelancerUsername: r.freelancer_username || r.freelancer_name?.toLowerCase().replace(/\s+/g, '_'),
-        freelancerAvatar: r.freelancer_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        freelancerAvatar: r.freelancer_avatar || DEFAULT_AVATAR,
         freelancerLevel: r.freelancer_level || 'Level 1 ★',
         title: r.title,
         slug: r.slug || r.title?.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, ''),
@@ -399,7 +400,7 @@ try {
         deliveryDays: Number(r.delivery_days || 7),
         rating: Number(r.rating || 5.0),
         reviewsCount: Number(r.reviews_count || 0),
-        image: r.image || 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&h=500&fit=crop',
+        image: r.image || DEFAULT_GIG_IMAGE,
         coverImage: r.cover_image || '',
         gallery: r.gallery || [],
         tags: r.tags || [],
@@ -414,7 +415,7 @@ try {
         name: r.name,
         username: r.username,
         role: r.role,
-        avatar: r.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        avatar: r.avatar || DEFAULT_AVATAR,
         title: r.title || '',
         rating: Number(r.rating || 5.0),
         reviewsCount: Number(r.reviews_count || 0),
@@ -436,7 +437,7 @@ try {
         id: r.id,
         buyerId: r.buyer_id,
         buyerName: r.buyer_name,
-        buyerAvatar: r.buyer_avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
+        buyerAvatar: r.buyer_avatar || DEFAULT_AVATAR,
         title: r.title,
         slug: r.slug || r.title?.toLowerCase().trim().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, ''),
         description: r.description,
@@ -487,12 +488,14 @@ try {
                        AND COALESCE(flag_reason, '') <> 'ACCOUNT_DELETED_BY_ADMIN'
                      ORDER BY created_at DESC NULLS LAST LIMIT 50`
                   ),
-              pool.query(
-                `SELECT * FROM projects
-                 WHERE status = 'open'
-                   AND (moderation_status IS NULL OR moderation_status = 'approved')
-                 ORDER BY created_at DESC NULLS LAST LIMIT 50`
-              )
+              SITE_CONFIG.AGENCY_MODE
+                ? Promise.resolve(emptyRows)
+                : pool.query(
+                    `SELECT * FROM projects
+                     WHERE status = 'open'
+                       AND (moderation_status IS NULL OR moderation_status = 'approved')
+                     ORDER BY created_at DESC NULLS LAST LIMIT 50`
+                  )
             ]);
             const entry: SsrPublicCacheEntry = {
               gigs: gRes.rows.map(mapGigRow),
@@ -704,6 +707,7 @@ if (process.env.NODE_ENV !== 'test' && !server.listening) {
       isStoreHydrated = true;
       ssrPublicCache = null;
       invalidateSsrHtmlCache();
+      prewarmSsrRoutes();
       console.log('[Server] PostgreSQL hydration completed successfully.');
       runBackgroundJobs();
     } catch (err) {
@@ -714,6 +718,7 @@ if (process.env.NODE_ENV !== 'test' && !server.listening) {
         console.warn('[DEV] Postgres hydration notice (continuing in dev mode):', err);
         isStoreHydrated = true;
         invalidateSsrHtmlCache();
+        prewarmSsrRoutes();
       }
     }
   })();

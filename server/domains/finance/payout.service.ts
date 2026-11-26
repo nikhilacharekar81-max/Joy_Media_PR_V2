@@ -33,14 +33,15 @@ export function formatPayoutRow(r: any): Payout {
 }
 
 export async function payoutAudit(req: Request, action: string, p: Payout, details: string): Promise<void> {
+  const callerRole = (req as any).authenticatedUser?.role || 'admin';
   await registerAuditLog({
     id: 'FAUD-' + randomUUID().slice(0, 12),
     actor: adminActor(req),
-    role: 'super_admin',
+    role: callerRole,
     action,
     target: `Payout #${p.id}`,
     details,
-    timestamp: new Date().toLocaleString()
+    timestamp: new Date().toISOString()
   });
 }
 
@@ -479,7 +480,7 @@ export const retryPayout = async (req: Request, res: Response) => {
     const actor = adminActor(req);
 
     const pRow = await postgresStore.executeInTransaction(async (client) => {
-      const pCheck = await client.query('SELECT * FROM payouts WHERE id = $1', [payoutId]);
+      const pCheck = await client.query('SELECT * FROM payouts WHERE id = $1 FOR UPDATE', [payoutId]);
       if (pCheck.rows.length === 0) throw { status: 404, message: 'Payout not found' };
       const p = pCheck.rows[0];
       if (p.status !== 'failed') {

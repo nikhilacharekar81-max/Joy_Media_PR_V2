@@ -21,6 +21,7 @@ import {
   apiError
 } from '../middleware/auth.js';
 import { disconnectUserSockets } from '../websocket.js';
+import { DEFAULT_AVATAR } from '../../src/constants.js';
 import {
   deliverSecurityCode,
   deliverAdminCode,
@@ -100,7 +101,7 @@ authRouter.post('/signup', rateLimit(20, 3_600_000), async (req: Request, res: R
       email: normalizedEmail,
       mobile: trimmedMobile || undefined,
       role: 'user',
-      avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&h=400&fit=crop',
+      avatar: DEFAULT_AVATAR,
       title: SITE_CONFIG.AGENCY_MODE ? 'Client' : 'Freelancer / Member',
       rating: 0,
       reviewsCount: 0,
@@ -118,7 +119,11 @@ authRouter.post('/signup', rateLimit(20, 3_600_000), async (req: Request, res: R
       password: hashedPassword,
       sessionVersion: 1,
       activeSessionVersions: [1],
-      knownDevices: req.body?.deviceId ? [String(req.body.deviceId).trim()] : ['dev_default_session']
+      knownDevices: (() => {
+        const rawDev = req.body?.deviceId || req.headers['x-device-id'];
+        const trimmedDev = typeof rawDev === 'string' ? rawDev.trim() : '';
+        return trimmedDev ? [trimmedDev] : ['dev_default_session'];
+      })()
     };
 
     await store.saveUser(newUser);
@@ -150,7 +155,7 @@ authRouter.post('/signup', rateLimit(20, 3_600_000), async (req: Request, res: R
 
     deliverSecurityCode(normalizedEmail, 'SIGNUP_EMAIL', emailCode);
 
-    if (trimmedMobile) {
+    if (trimmedMobile && !SITE_CONFIG.AGENCY_MODE) {
       const smsCode = generate6DigitCode();
       const smsExpiresAtMs = Date.now() + 30 * 60 * 1000;
       if (isPostgresEnabled()) {
@@ -599,7 +604,7 @@ authRouter.post('/admin-setup', rateLimit(10, 15 * 60_000, 'admin_setup'), async
         const metaRes = await client.query(
           "SELECT value FROM app_metadata WHERE key = 'admin_setup_completed' LIMIT 1"
         );
-        if (metaRes.rows.length > 0 && metaRes.rows[0].value === 'true') {
+        if (metaRes.rows.length > 0 && (metaRes.rows[0].value === true || metaRes.rows[0].value === 'true')) {
           return { status: 403, error: 'Initial administrator setup has already been completed.' };
         }
 
@@ -1133,7 +1138,7 @@ export async function findOrCreateGoogleUser(params: {
     }
     user.emailVerified = true;
     user.verified = true;
-    if (params.picture && (!user.avatar || user.avatar.includes('unsplash.com'))) {
+    if (params.picture && (!user.avatar || user.avatar === DEFAULT_AVATAR || user.avatar.includes('unsplash.com'))) {
       user.avatar = params.picture;
     }
     if (!Array.isArray(user.knownDevices)) {
@@ -1162,7 +1167,7 @@ export async function findOrCreateGoogleUser(params: {
       name: displayName,
       email: normalizedEmail,
       role: 'user',
-      avatar: params.picture || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=400&h=400&fit=crop',
+      avatar: params.picture || DEFAULT_AVATAR,
       title: SITE_CONFIG.AGENCY_MODE ? 'Client' : 'Freelancer / Member',
       rating: 0,
       reviewsCount: 0,

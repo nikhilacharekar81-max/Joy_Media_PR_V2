@@ -1237,7 +1237,7 @@ export const WorkstreamActivityStream: React.FC<WorkstreamActivityStreamProps> =
 
             // 3. Conversational messages (Chat bubbles)
             const senderObj = usersList.find(u => u.id === msg.senderId) || (isMe ? undefined : partnerUser);
-            const avatarUrl = msg.senderAvatar || senderObj?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop';
+            const avatarUrl = msg.senderAvatar || senderObj?.avatar || DEFAULT_AVATAR;
             const senderName = msg.senderName || senderObj?.name || (isMe ? 'You' : 'Partner');
 
             const isFailed = msg.status === 'failed';

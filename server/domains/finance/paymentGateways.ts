@@ -741,6 +741,21 @@ export class PaymentGatewayManager {
     const hasCredentials = Boolean(gw && gw.enabled && gw.clientId && gw.clientSecret);
     const expectedCurr = (params.expectedCurrency || 'USD').toUpperCase();
 
+    const simAllowed = !isProd && process.env.PAYMENT_SIMULATION_ENABLED !== 'false';
+    if (simAllowed && params.paypalOrderId.startsWith('sess_sim_')) {
+      const simCaptureId = `CAP_SIM_${params.paypalOrderId.replace(/[^a-zA-Z0-9]/g, '').slice(-16).toUpperCase()}`;
+      return {
+        verified: true,
+        paypalOrderId: params.paypalOrderId,
+        captureId: simCaptureId,
+        status: 'COMPLETED',
+        amountValue: params.expectedAmount.toFixed(2),
+        currencyCode: expectedCurr,
+        customId: params.expectedSessionId || '',
+        invoiceId: params.expectedSessionId || ''
+      };
+    }
+
     if (!hasCredentials) {
       if (isProd) {
         return {
@@ -753,20 +768,6 @@ export class PaymentGatewayManager {
           customId: '',
           invoiceId: '',
           error: 'PayPal gateway credentials missing in production.'
-        };
-      }
-      const simAllowed = process.env.PAYMENT_SIMULATION_ENABLED !== 'false';
-      if (simAllowed && params.paypalOrderId.startsWith('sess_sim_')) {
-        const simCaptureId = `CAP_SIM_${params.paypalOrderId.replace(/[^a-zA-Z0-9]/g, '').slice(-16).toUpperCase()}`;
-        return {
-          verified: true,
-          paypalOrderId: params.paypalOrderId,
-          captureId: simCaptureId,
-          status: 'COMPLETED',
-          amountValue: params.expectedAmount.toFixed(2),
-          currencyCode: expectedCurr,
-          customId: params.expectedSessionId || '',
-          invoiceId: params.expectedSessionId || ''
         };
       }
       return {
@@ -1473,6 +1474,12 @@ export class PaymentGatewayManager {
       } else if (params.gateway === 'razorpay') {
         const authHeader = `Basic ${Buffer.from(`${gw.clientId}:${gw.clientSecret}`).toString('base64')}`;
         const itemDescription = (params.description || `${SITE_CONFIG.brandName} ${params.purpose === 'deposit' ? 'Account Credit' : 'Service Order Payment'}`).slice(0, 200);
+        const configuredCurrency = String(process.env.RAZORPAY_CURRENCY || params.currency || 'USD').trim().toUpperCase();
+        const rzpCurrency = configuredCurrency === 'INR' ? 'INR' : 'USD';
+        const inrRate = Number(process.env.RAZORPAY_USD_TO_INR_RATE || 0);
+        const payableAmount = rzpCurrency === 'INR' && Number.isFinite(inrRate) && inrRate > 0
+          ? Math.round(params.amount * inrRate * 100)
+          : Math.round(params.amount * 100);
         // Use Razorpay Hosted Payment Links so Razorpay matches the exact hosted-redirect UX of PayPal and Stripe
         const linkRes = await fetch('https://api.razorpay.com/v1/payment_links', {
           method: 'POST',
@@ -1481,14 +1488,14 @@ export class PaymentGatewayManager {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            amount: Math.round(params.amount * 100),
-            currency: 'USD',
+            amount: payableAmount,
+            currency: rzpCurrency,
             accept_partial: false,
             reference_id: params.checkoutId,
             description: itemDescription,
             callback_url: `${baseAppUrl}/checkout/success?session_id=${encodeURIComponent(params.checkoutId)}&gateway=razorpay`,
             callback_method: 'get',
-            notes: { userId: params.userId, checkoutId: params.checkoutId }
+            notes: { userId: params.userId, checkoutId: params.checkoutId, usdAmount: String(params.amount) }
           }),
           signal: AbortSignal.timeout(GATEWAY_FETCH_TIMEOUT_MS)
         });

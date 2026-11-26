@@ -3,6 +3,7 @@ import { Search, FolderKanban, Users, Shield, Star, Inbox, MessageSquare, Clock,
 import { UserAccount, Project, isStaffRole } from '../../types';
 import { WorkstreamFilter, WorkstreamItem, WORKSTREAM_TAB_STATUSES } from './types';
 import { AGENCY_MODE } from '../../siteConfig';
+import { DEFAULT_AVATAR } from '../../constants';
 
 interface WorkstreamSidebarProps {
   currentTab: WorkstreamFilter;
@@ -197,10 +198,12 @@ export const WorkstreamSidebar: React.FC<WorkstreamSidebarProps> = ({
                 >
                   <div className="flex items-center gap-2.5 min-w-0">
                     <img
-                      src={person.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop'}
+                      src={person.avatar || DEFAULT_AVATAR}
                       className="w-7 h-7 rounded-full object-cover ring-1 ring-slate-200 shrink-0"
                       alt={person.name}
-                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'; }}
+                      loading="lazy"
+                      decoding="async"
+                      onError={(e) => { (e.target as HTMLImageElement).src = DEFAULT_AVATAR; }}
                     />
                     <div className="truncate">
                       <div className="text-xs font-bold text-agency-dark truncate">

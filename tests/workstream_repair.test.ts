@@ -9,6 +9,7 @@ import { postgresStore } from '../server/db/postgresStore.ts';
 import { signToken } from '../server/middleware/auth.ts';
 import { financialTransactionService } from '../server/domains/finance/financial.service.ts';
 import { siteSettings } from '../server/domains/admin/siteSettings.ts';
+import { SITE_CONFIG } from '../src/siteConfig.ts';
 
 function createAuthHeaders(user: { id: string; role: string; email: string; sessionVersion?: number }, extraHeaders: Record<string, string> = {}) {
   const token = signToken({
@@ -710,10 +711,49 @@ test('FivePA WorkStream & Workspace Architecture Repair Suite (Parts 15.A - 15.G
       assert.strictEqual(projRes.status, 200);
       const project = await projRes.json();
 
-      // Seller 1 submits Proposal 1
+      let quote1Headers = sellerHeaders;
+      let quote2Headers = seller2Headers;
+
+      if (SITE_CONFIG.AGENCY_MODE) {
+        // In Agency Mode, non-staff freelancers cannot submit quotes on private client requests
+        const deniedRes = await fetch(`${baseUrl}/api/proposals`, {
+          method: 'POST',
+          headers: sellerHeaders,
+          body: JSON.stringify({
+            projectId: project.id,
+            bidAmount: 200,
+            deliveryDays: 5,
+            coverLetter: 'Non-staff proposal should be rejected in Agency Mode',
+          }),
+        });
+        assert.strictEqual(deniedRes.status, 403);
+
+        const staff1User: any = {
+          ...sellerUser,
+          id: `USR-STAFF1-${suffix}`,
+          username: `staff1_${suffix}`,
+          email: `staff1_${suffix}@example.com`,
+          role: 'support',
+        };
+        const staff2User: any = {
+          ...seller2User,
+          id: `USR-STAFF2-${suffix}`,
+          username: `staff2_${suffix}`,
+          email: `staff2_${suffix}@example.com`,
+          role: 'support',
+        };
+        await store.saveUser(staff1User);
+        await store.saveUser(staff2User);
+        await financialTransactionService.ensureWallet(staff1User.id);
+        await financialTransactionService.ensureWallet(staff2User.id);
+        quote1Headers = createAuthHeaders(staff1User);
+        quote2Headers = createAuthHeaders(staff2User);
+      }
+
+      // Seller / Staff 1 submits Proposal 1
       const prop1Res = await fetch(`${baseUrl}/api/proposals`, {
         method: 'POST',
-        headers: sellerHeaders,
+        headers: quote1Headers,
         body: JSON.stringify({
           projectId: project.id,
           bidAmount: 200,
@@ -724,10 +764,10 @@ test('FivePA WorkStream & Workspace Architecture Repair Suite (Parts 15.A - 15.G
       assert.strictEqual(prop1Res.status, 200);
       const prop1 = await prop1Res.json();
 
-      // Seller 2 submits Proposal 2
+      // Seller / Staff 2 submits Proposal 2
       const prop2Res = await fetch(`${baseUrl}/api/proposals`, {
         method: 'POST',
-        headers: seller2Headers,
+        headers: quote2Headers,
         body: JSON.stringify({
           projectId: project.id,
           bidAmount: 250,

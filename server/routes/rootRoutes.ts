@@ -21,7 +21,7 @@ rootRouter.get(['/auth/callback', '/auth/callback/'], handleGoogleOAuthCallback)
 
 rootRouter.get('/robots.txt', (_req, res) => {
   res.type('text/plain').send(
-    `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin/\nDisallow: /workstream/\nDisallow: /checkout/\nDisallow: /payments/\nDisallow: /wallet/\nDisallow: /add-service\n\nSitemap: ${SITE_CONFIG.baseUrl}/sitemap.xml\n`
+    `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /admin/\nDisallow: /workstream/\nDisallow: /checkout/\nDisallow: /payments/\nDisallow: /wallet/\nDisallow: /add-service\nDisallow: /profile/\nDisallow: /freelancer/\nDisallow: /freelancers/\nDisallow: /user/\nDisallow: /orders/\nDisallow: /settings\nDisallow: /messages\n\nSitemap: ${SITE_CONFIG.baseUrl}/sitemap.xml\n`
   );
 });
 

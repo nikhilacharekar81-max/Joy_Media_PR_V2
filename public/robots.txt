@@ -7,5 +7,12 @@ Disallow: /checkout/
 Disallow: /payments/
 Disallow: /wallet/
 Disallow: /add-service
+Disallow: /profile/
+Disallow: /freelancer/
+Disallow: /freelancers/
+Disallow: /user/
+Disallow: /orders/
+Disallow: /settings
+Disallow: /messages
 
 Sitemap: https://joymediapr.com/sitemap.xml

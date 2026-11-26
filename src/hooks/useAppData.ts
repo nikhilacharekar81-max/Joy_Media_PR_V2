@@ -167,10 +167,14 @@ export const useAppData = (initialData?: any, options?: UseAppDataOptions) => {
           cleanActivePath.startsWith('/categories/');
 
         const skipPublicMarketplace = legalRoute && isInitialMountPass;
-        const skipUsersOnMount = skipPublicMarketplace || (isInitialMountPass && !isTokenAdmin && initialHydratedFlagsRef.current.hasUsers);
+        const skipUsersOnMount =
+          skipPublicMarketplace ||
+          (SITE_CONFIG.AGENCY_MODE && !isTokenAdmin) ||
+          (isInitialMountPass && !isTokenAdmin && initialHydratedFlagsRef.current.hasUsers);
         const skipGigsOnMount = skipPublicMarketplace || (isInitialMountPass && initialHydratedFlagsRef.current.hasGigs);
         const skipProjectsOnMount =
           skipPublicMarketplace ||
+          (SITE_CONFIG.AGENCY_MODE && !token) ||
           (isInitialMountPass && isPublicCatalogLanding && !cachedUserId && !token);
         const skipCategoriesOnMount =
           skipPublicMarketplace ||
@@ -182,6 +186,7 @@ export const useAppData = (initialData?: any, options?: UseAppDataOptions) => {
           (!isInitialMountPass && initialHydratedFlagsRef.current.hasReviews);
         const skipFeesOnMount =
           skipPublicMarketplace ||
+          (SITE_CONFIG.AGENCY_MODE && isPublicCatalogLanding) ||
           (!isInitialMountPass && initialHydratedFlagsRef.current.hasFees);
 
         const baseReqOpt = buildReqOpt(token);

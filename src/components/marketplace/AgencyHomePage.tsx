@@ -465,8 +465,11 @@ export const AgencyHomePage: React.FC<AgencyHomePageProps> = React.memo(({
                     <img
                       src={HERO_SHOWCASE_IMG}
                       alt="Editorial media placement and press release distribution desk"
+                      width={800}
+                      height={500}
                       referrerPolicy="no-referrer"
                       fetchPriority="high"
+                      loading="eager"
                       decoding="async"
                       onError={() => setHeroImgFailed(true)}
                       className="w-full h-full object-cover"
@@ -784,17 +787,26 @@ export const AgencyHomePage: React.FC<AgencyHomePageProps> = React.memo(({
           {featuredPlacements.length === 0 ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 p-12 text-center max-w-lg mx-auto space-y-4">
               <Newspaper className="w-8 h-8 text-slate-400 mx-auto" />
-              <h3 className="text-base font-bold text-slate-900">Loading Media Placements</h3>
+              <h3 className="text-base font-bold text-slate-900">No Media Placements Listed Yet</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Explore our full catalog of media placements, guest posting opportunities, and digital services.
+                Explore our full catalog or request a tailored guest post, press release, or digital campaign quote.
               </p>
-              <button
-                type="button"
-                onClick={(e) => navigate('/services', e)}
-                className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-              >
-                Browse All Media Placements
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <button
+                  type="button"
+                  onClick={(e) => navigate('/services', e)}
+                  className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                >
+                  Browse Full Catalog
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => navigate('/post-project', e)}
+                  className="px-5 py-2.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-200 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                >
+                  Get a Custom Quote
+                </button>
+              </div>
             </div>
           ) : placementViewMode === 'list' ? (
             <div className="space-y-4">
@@ -1115,6 +1127,8 @@ export const AgencyHomePage: React.FC<AgencyHomePageProps> = React.memo(({
                 <img
                   src={WHY_CHOOSE_US_IMG}
                   alt={`${SITE_CONFIG.brandName} digital agency strategy and editorial team workspace`}
+                  width={720}
+                  height={540}
                   referrerPolicy="no-referrer"
                   loading="lazy"
                   decoding="async"
@@ -1354,6 +1368,8 @@ export const AgencyHomePage: React.FC<AgencyHomePageProps> = React.memo(({
                     <img
                       src={WEB_DEV_SHOWCASE_IMG}
                       alt="Custom web application and Shopify ecommerce storefront preview"
+                      width={720}
+                      height={480}
                       referrerPolicy="no-referrer"
                       loading="lazy"
                       decoding="async"

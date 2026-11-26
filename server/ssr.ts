@@ -19,13 +19,15 @@ interface SsrHtmlCacheEntry {
   statusCode: number;
   rawBuf: Buffer;
   gzipBuf: Buffer;
+  brotliBuf: Buffer;
   etag: string;
   expiresAt: number;
   hydrated: boolean;
 }
 
-const SSR_HTML_CACHE_TTL_MS = 30_000;
+const SSR_HTML_CACHE_TTL_MS = 60_000;
 const ssrHtmlCache = new Map<string, SsrHtmlCacheEntry>();
+let prewarmFn: (() => Promise<void>) | null = null;
 const CACHEABLE_PUBLIC_PATHS = new Set([
   '/',
   '/services',
@@ -44,6 +46,12 @@ const CACHEABLE_PUBLIC_PATHS = new Set([
 
 export function invalidateSsrHtmlCache() {
   ssrHtmlCache.clear();
+}
+
+export function prewarmSsrRoutes() {
+  if (prewarmFn) {
+    void prewarmFn().catch(() => {});
+  }
 }
 
 function safeDecodeURIComponent(str: string): string {
@@ -88,17 +96,40 @@ function stripLocalAssetCrossorigin(html: string): string {
   });
 }
 
+function buildCacheEntry(statusCode: number, finalHtml: string, hydrated: boolean): SsrHtmlCacheEntry {
+  const rawBuf = Buffer.from(finalHtml, 'utf8');
+  const gzipBuf = zlib.gzipSync(rawBuf, { level: 6 });
+  const brotliBuf = zlib.brotliCompressSync(rawBuf, {
+    params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 }
+  });
+  const etag = `W/"${createHash('sha1').update(rawBuf).digest('base64url').slice(0, 16)}"`;
+  return {
+    statusCode,
+    rawBuf,
+    gzipBuf,
+    brotliBuf,
+    etag,
+    expiresAt: Date.now() + SSR_HTML_CACHE_TTL_MS,
+    hydrated
+  };
+}
+
 function sendCachedEntry(req: Request, res: Response, entry: SsrHtmlCacheEntry) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('ETag', entry.etag);
   res.setHeader('Vary', 'Accept-Encoding');
-  res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+  res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
 
   if (req.headers['if-none-match'] === entry.etag) {
     return res.status(304).end();
   }
 
   const acceptEncoding = String(req.headers['accept-encoding'] || '');
+  if (acceptEncoding.includes('br')) {
+    res.setHeader('Content-Encoding', 'br');
+    res.setHeader('Content-Length', String(entry.brotliBuf.length));
+    return res.status(entry.statusCode).end(entry.brotliBuf);
+  }
   if (acceptEncoding.includes('gzip')) {
     res.setHeader('Content-Encoding', 'gzip');
     res.setHeader('Content-Length', String(entry.gzipBuf.length));
@@ -170,7 +201,7 @@ export async function setupSSR(
     const isDataHydrated = rawData.hydrated !== false;
     const PUBLIC_GIGS = rawData.gigs.filter(isGigPublic).map(sanitizePublicGig);
     const PUBLIC_USERS = SITE_CONFIG.AGENCY_MODE ? [] : rawData.users.filter(isUserPublic).map(sanitizePublicUser);
-    const PUBLIC_PROJECTS = rawData.projects.filter(isProjectPublic).map(sanitizePublicProject);
+    const PUBLIC_PROJECTS = SITE_CONFIG.AGENCY_MODE ? [] : rawData.projects.filter(isProjectPublic).map(sanitizePublicProject);
     const PUBLIC_CATEGORIES = rawData.categories || [];
 
     let initialData: any = {
@@ -178,7 +209,7 @@ export async function setupSSR(
       ssrHydrated: isDataHydrated,
       gigs: PUBLIC_GIGS,
       users: SITE_CONFIG.AGENCY_MODE ? [] : PUBLIC_USERS,
-      projects: PUBLIC_PROJECTS,
+      projects: SITE_CONFIG.AGENCY_MODE ? [] : PUBLIC_PROJECTS,
       ...(PUBLIC_CATEGORIES.length > 0 ? { categories: PUBLIC_CATEGORIES } : {})
     };
 
@@ -303,6 +334,15 @@ export async function setupSSR(
     }
 
     const rendered = renderFn ? renderFn(pathname, initialData) : { html: '', head: '' };
+    const hasSuspenseAbort =
+      rendered.html.includes('<!--$!-->') || rendered.html.includes('data-msg="Switched to client rendering');
+    // Strip any internal server stack paths emitted by React renderToString Suspense fallback templates
+    const sanitizedRenderedHtml = hasSuspenseAbort
+      ? rendered.html
+          .replace(/\s+data-cstck="[^"]*"/g, '')
+          .replace(/\s+data-stck="[^"]*"/g, '')
+          .replace(/\s+data-msg="[^"]*"/g, '')
+      : rendered.html;
 
     const serializedInitialData = JSON.stringify(initialData)
       .replace(/</g, '\\u003c')
@@ -310,15 +350,24 @@ export async function setupSSR(
       .replace(/\u2028/g, '\\u2028')
       .replace(/\u2029/g, '\\u2029');
 
+    // Preload hero LCP image immediately on homepage so the browser fetches it before JS hydrates
+    let heroPreloadTag = '';
+    if (normalizedLowerPath === '/') {
+      const heroMatch = sanitizedRenderedHtml.match(/<img[^>]+src="([^"]*hero_editorial_pr_showcase[^"]*\.webp)"/i);
+      if (heroMatch && heroMatch[1]) {
+        heroPreloadTag = `\n<link rel="preload" as="image" href="${heroMatch[1]}" type="image/webp" fetchpriority="high" />`;
+      }
+    }
+
     // Only inline compiled CSS in unbundled Vite dev fallback; built assets use immutable cached <link rel="stylesheet">
     const inlineCssTag = (!hasProdBuild && devCompiledCss) ? `\n<style id="ssr-dev-css">${devCompiledCss}</style>` : '';
     const cleanedTemplate = (!hasProdBuild && devCompiledCss) ? stripDevCssLink(template) : template;
 
     const finalHtml = cleanedTemplate
-      .replace('</head>', () => `${rendered.head}${inlineCssTag}\n</head>`)
+      .replace('</head>', () => `${rendered.head}${heroPreloadTag}${inlineCssTag}\n</head>`)
       .replace(
         '<div id="root"></div>',
-        () => `<div id="root">${rendered.html}</div>\n<script>window.__INITIAL_DATA__ = ${serializedInitialData};</script>`
+        () => `<div id="root">${sanitizedRenderedHtml}</div>\n<script>window.__INITIAL_DATA__ = ${serializedInitialData};</script>`
       );
 
     return {
@@ -326,7 +375,8 @@ export async function setupSSR(
       statusCode: notFound ? 404 : 200,
       isPrivate,
       notFound,
-      hydrated: isDataHydrated
+      hydrated: isDataHydrated,
+      hasSuspenseAbort
     };
   };
 
@@ -403,25 +453,21 @@ export async function setupSSR(
       return ssrRender;
     };
 
-    ssrRenderPromise = loadServerEntry()
-      .then(async (renderFn) => {
-        // Immediately pre-warm and pre-compress `/` into RAM so even the very first hit is < 0.3ms
+    const warmKeyPublicRoutes = async () => {
+      for (const routePath of ['/', '/services']) {
         try {
-          const result = await renderAndBuildHtml('/', undefined);
-          if (!result.isPrivate && !result.notFound && result.hydrated) {
-            const rawBuf = Buffer.from(result.finalHtml, 'utf8');
-            const gzipBuf = zlib.gzipSync(rawBuf, { level: 6 });
-            const etag = `W/"${createHash('sha1').update(rawBuf).digest('base64url').slice(0, 16)}"`;
-            ssrHtmlCache.set('/', {
-              statusCode: result.statusCode,
-              rawBuf,
-              gzipBuf,
-              etag,
-              expiresAt: Date.now() + SSR_HTML_CACHE_TTL_MS,
-              hydrated: result.hydrated
-            });
+          const result = await renderAndBuildHtml(routePath, undefined);
+          if (!result.isPrivate && !result.notFound && result.hydrated && !result.hasSuspenseAbort) {
+            ssrHtmlCache.set(routePath, buildCacheEntry(result.statusCode, result.finalHtml, result.hydrated));
           }
         } catch {}
+      }
+    };
+    prewarmFn = warmKeyPublicRoutes;
+
+    ssrRenderPromise = loadServerEntry()
+      .then(async (renderFn) => {
+        await warmKeyPublicRoutes();
         return renderFn;
       })
       .catch((err) => {
@@ -489,18 +535,8 @@ export async function setupSSR(
 
       const result = await renderAndBuildHtml(pathname, query);
 
-      if (canUseHtmlCache && !result.isPrivate && !result.notFound) {
-        const rawBuf = Buffer.from(result.finalHtml, 'utf8');
-        const gzipBuf = zlib.gzipSync(rawBuf, { level: 6 });
-        const etag = `W/"${createHash('sha1').update(rawBuf).digest('base64url').slice(0, 16)}"`;
-        const entry: SsrHtmlCacheEntry = {
-          statusCode: result.statusCode,
-          rawBuf,
-          gzipBuf,
-          etag,
-          expiresAt: Date.now() + SSR_HTML_CACHE_TTL_MS,
-          hydrated: result.hydrated
-        };
+      if (canUseHtmlCache && !result.isPrivate && !result.notFound && result.hydrated && !result.hasSuspenseAbort) {
+        const entry = buildCacheEntry(result.statusCode, result.finalHtml, result.hydrated);
         ssrHtmlCache.set(normalizedPath, entry);
         return sendCachedEntry(req, res, entry);
       }

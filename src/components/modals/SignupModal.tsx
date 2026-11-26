@@ -114,13 +114,14 @@ export const SignupModal: React.FC<SignupModalProps> = ({
             />
           </div>
           <div>
-            <label className="block text-slate-700 font-bold uppercase mb-1">Mobile Phone Number</label>
+            <label className="block text-slate-700 font-bold uppercase mb-1">
+              Mobile Phone Number <span className="text-slate-400 font-normal normal-case">(Optional)</span>
+            </label>
             <input 
               type="tel" 
               placeholder="+1 (555) 000-0000" 
               value={signupMobile} 
               onChange={(e) => setSignupMobile(e.target.value)} 
-              required 
               className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-hidden" 
             />
           </div>

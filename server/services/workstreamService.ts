@@ -13,7 +13,7 @@ import {
   type Message
 } from '../store.js';
 import { postgresStore } from '../db/postgresStore.js';
-import { calculateOrderFees, quoteOrderWithLiveSettings } from '../domains/finance/fees.js';
+import { calculateOrderFees, quoteOrderWithLiveSettings, DEFAULT_FEE_POLICY } from '../domains/finance/fees.js';
 import { financialRepository } from './financialService.js';
 import { siteSettings } from '../../src/server/siteSettings.js';
 import { isStaffUser } from '../middleware/auth.js';
@@ -451,7 +451,7 @@ export async function viewOffer(o: WorkstreamOffer) {
   let clientAdditionalTotal: number | undefined;
   let autoReleaseAt: string | undefined;
   try {
-    const liveQuote = await quoteOrderWithLiveSettings(o.amount).catch(() => calculateOrderFees(o.amount));
+    const liveQuote = await quoteOrderWithLiveSettings(o.amount).catch(() => calculateOrderFees(o.amount, DEFAULT_FEE_POLICY));
     clientTotal = liveQuote?.clientTotal;
     if (o.kind === 'invoice') {
       const ord = await store.getOrder(o.orderId as string);
@@ -460,7 +460,7 @@ export async function viewOffer(o: WorkstreamOffer) {
       const addAmt = Math.max(0, Math.round((o.amount - curr) * 100) / 100);
       additionalAmount = addAmt;
       if (addAmt > 0) {
-        const addQuote = await quoteOrderWithLiveSettings(addAmt).catch(() => calculateOrderFees(addAmt));
+        const addQuote = await quoteOrderWithLiveSettings(addAmt).catch(() => calculateOrderFees(addAmt, DEFAULT_FEE_POLICY));
         clientAdditionalTotal = addQuote?.clientTotal;
       } else {
         clientAdditionalTotal = 0;

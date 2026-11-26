@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { X, ShieldCheck, DollarSign, Calendar, User, FileText } from 'lucide-react';
-import { UserAccount, Gig } from '../../types';
-import { SITE_CONFIG } from '../../siteConfig';
+import { UserAccount, Gig, isStaffRole } from '../../types';
+import { AGENCY_MODE, SITE_CONFIG } from '../../siteConfig';
 
 interface StartWorkstreamModalProps {
   isOpen: boolean;
@@ -32,15 +32,17 @@ export const StartWorkstreamModal: React.FC<StartWorkstreamModalProps> = ({
 
   if (!isOpen) return null;
 
+  const isAgencyClient = AGENCY_MODE && !isStaffRole(currentUser?.role);
   const candidates = usersList.filter(u => u.id !== currentUser?.id);
+  const effectivePartnerId = isAgencyClient ? 'agency_default' : partnerId;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !partnerId) return;
+    if (!title.trim() || !effectivePartnerId) return;
 
     onSubmit({
       title: title.trim(),
-      partnerId,
+      partnerId: effectivePartnerId,
       amount: Math.max(5, Number(amount) || 50),
       turnaroundDays: Math.max(1, Number(turnaroundDays) || 3),
       requirements: requirements.trim() || 'Workstream scope agreed via initial brief.'
@@ -89,24 +91,36 @@ export const StartWorkstreamModal: React.FC<StartWorkstreamModalProps> = ({
             />
           </div>
 
-          <div>
-            <label className="block text-agency-dark font-bold uppercase tracking-wider text-[10px] mb-1.5">
-              Select Collaborator / Partner
-            </label>
-            <select
-              required
-              value={partnerId}
-              onChange={(e) => setPartnerId(e.target.value)}
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-agency-dark focus:outline-none focus:border-emerald-500 focus:bg-white"
-            >
-              <option value="">Choose a participant...</option>
-              {candidates.map((cand) => (
-                <option key={cand.id} value={cand.id}>
-                  {cand.name} - {cand.title || cand.email}
-                </option>
-              ))}
-            </select>
-          </div>
+          {isAgencyClient ? (
+            <div>
+              <label className="block text-agency-dark font-bold uppercase tracking-wider text-[10px] mb-1.5">
+                Agency Team
+              </label>
+              <div className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-agency-dark font-semibold flex items-center justify-between">
+                <span>{SITE_CONFIG.brandName} Team</span>
+                <span className="text-[10px] text-emerald-700 font-bold uppercase">Direct Fulfillment</span>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-agency-dark font-bold uppercase tracking-wider text-[10px] mb-1.5">
+                Select Collaborator / Partner
+              </label>
+              <select
+                required
+                value={partnerId}
+                onChange={(e) => setPartnerId(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-agency-dark focus:outline-none focus:border-emerald-500 focus:bg-white"
+              >
+                <option value="">Choose a participant...</option>
+                {candidates.map((cand) => (
+                  <option key={cand.id} value={cand.id}>
+                    {cand.name} - {cand.title || cand.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>

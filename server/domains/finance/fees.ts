@@ -111,7 +111,7 @@ export function validateFeeConfig(cfg: FeeConfig): void {
  *  3. Small-order fee: flat smallOrderFee ($1.00) on top when the gig price is strictly under smallOrderThreshold ($200).
  *     The threshold is tested against the gig price (gig + extras), before the service fee.
  */
-export function calculateOrderFees(gigPrice: number, cfg: FeeConfig = DEFAULT_FEE_CONFIG): OrderFeeBreakdown {
+export function calculateOrderFees(gigPrice: number, cfg: FeeConfig = DEFAULT_FEE_POLICY): OrderFeeBreakdown {
   validateFeeConfig(cfg);
   const gig = toCents(gigPrice);
   const service = percentOfCents(gig, cfg.buyerFeePercent);
@@ -145,7 +145,7 @@ export function calculateOrderFees(gigPrice: number, cfg: FeeConfig = DEFAULT_FE
 /**
  * Resolves the effective fee policy for an order, checking order snapshot first, then site settings, then default config.
  */
-export function resolveEffectiveFeePolicy(orderSnapshot?: any, fallbackConfig: FeeConfig = DEFAULT_FEE_CONFIG): FeeConfig {
+export function resolveEffectiveFeePolicy(orderSnapshot?: any, fallbackConfig: FeeConfig = DEFAULT_FEE_POLICY): FeeConfig {
   if (!orderSnapshot) return { ...fallbackConfig };
 
   const numOrUndef = (v: any): number | undefined => {
@@ -207,7 +207,7 @@ export function resolveEffectiveFeePolicy(orderSnapshot?: any, fallbackConfig: F
  * Computes differential fees when topping up an existing escrow order.
  * Preserves historical policy and computes additional amounts without double-charging base fees.
  */
-export function calculateDifferentialFees(previousOrderAmount: number, newTotalOrderAmount: number, policy: FeeConfig = DEFAULT_FEE_CONFIG) {
+export function calculateDifferentialFees(previousOrderAmount: number, newTotalOrderAmount: number, policy: FeeConfig = DEFAULT_FEE_POLICY) {
   validateFeeConfig(policy);
   const prev = calculateOrderFees(previousOrderAmount, policy);
   const next = calculateOrderFees(newTotalOrderAmount, policy);

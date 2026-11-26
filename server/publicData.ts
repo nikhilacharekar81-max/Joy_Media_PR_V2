@@ -102,6 +102,7 @@ export function sanitizePublicGig(g: Gig) {
 const PUBLIC_PROJECT_STATUSES = new Set(['open', 'published', 'in_progress']);
 
 export function isProjectPublic(p: Project): boolean {
+  if (SITE_CONFIG.AGENCY_MODE) return false;
   if (!p || typeof p !== 'object') return false;
   const status = (p.status || '').toLowerCase();
   if (!PUBLIC_PROJECT_STATUSES.has(status)) return false;

@@ -3,7 +3,7 @@ import { Star, Trash2, Settings, ShieldCheck } from 'lucide-react';
 import { Gig } from '../../types';
 import { RelatedGigsSection } from './RelatedGigsSection';
 import { Reviews } from '../gig_reviews';
-import { RATINGS_ENABLED } from '../../constants';
+import { RATINGS_ENABLED, DEFAULT_GIG_IMAGE } from '../../constants';
 
 interface ViewingGigModalProps {
   viewingGig: Gig | null;
@@ -54,9 +54,11 @@ export const ViewingGigModal: React.FC<ViewingGigModalProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-4">
             <img 
-              src={viewingGig.image || 'https://images.unsplash.com/photo-1498050108023-c5249f4df085?w=800&h=500&fit=crop'} 
+              src={viewingGig.image || DEFAULT_GIG_IMAGE} 
               className="w-full h-48 rounded-2xl object-cover border border-slate-200 shadow-xs" 
               alt={viewingGig.title}
+              loading="lazy"
+              decoding="async"
               referrerPolicy="no-referrer"
             />
             <div className={`grid ${RATINGS_ENABLED ? 'grid-cols-3' : 'grid-cols-2'} gap-2`}>

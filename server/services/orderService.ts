@@ -92,9 +92,22 @@ export async function recordOrder(o: Order, client?: any): Promise<void> {
   registerOrder(o);
 }
 
+export function normalizeAuditTimestamp(raw?: string): string {
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+  return new Date().toISOString();
+}
+
 export async function registerAuditLog(log: AuditLog, client?: any): Promise<void> {
   try {
-    await store.addAuditLog(log, client);
+    await store.addAuditLog({
+      ...log,
+      timestamp: normalizeAuditTimestamp(log.timestamp)
+    }, client);
   } catch (err) {
     console.error('[PostgresStore] Failed to save audit log:', err);
   }

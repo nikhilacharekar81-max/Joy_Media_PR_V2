@@ -84,7 +84,7 @@ router.get('/orders', requireAuth, requireActiveStatus, async (req: Request, res
     await processAutoAcceptOrders();
     const authUserId = resolveAuthenticatedUserId(req)!;
     const caller = await store.getUser(authUserId);
-    const isAdmin = caller?.role === 'admin' || caller?.role === 'super_admin' || caller?.role === 'support';
+    const isAdmin = isStaffUser(caller);
 
     const pool = postgresStore.getPool();
     const inqRes = await pool.query(
@@ -440,7 +440,16 @@ router.post('/orders', requireAuth, requireActiveStatus, rateLimit(30, 60_000), 
     const buyer = requestedBuyerId === userCaller.id ? userCaller : await store.getUser(requestedBuyerId);
     if (!buyer) return res.status(404).json({ error: 'Buyer account not found.' });
     const buyerId = buyer.id;
-    const sellerId = String(req.body?.sellerId || '');
+    let sellerId = String(req.body?.sellerId || '').trim();
+    if (SITE_CONFIG.AGENCY_MODE && (!sellerId || sellerId === 'agency' || sellerId === 'agency_default')) {
+      const allUsers = await store.listUsers();
+      const agencyStaff =
+        allUsers.find(u => u.role === 'super_admin' && u.status === 'active' && u.id !== buyerId) ||
+        allUsers.find(u => isStaffUser(u) && u.status === 'active' && u.id !== buyerId);
+      if (agencyStaff) {
+        sellerId = agencyStaff.id;
+      }
+    }
 
     const seller = await store.getUser(sellerId);
     if (!seller) return res.status(404).json({ error: 'Seller not found.' });

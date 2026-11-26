@@ -62,6 +62,10 @@ router.get('/users/:userId/reviews', async (req: Request, res: Response) => {
     const caller = authUserId ? await store.getUser(authUserId) : null;
     const isAdmin = isStaffUser(caller);
 
+    if (SITE_CONFIG.AGENCY_MODE && !isAdmin && authUserId !== targetUserId) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
     const { mapReviewRow } = await import('../store.js');
     const revRes = await postgresStore.getPool().query(
       'SELECT * FROM reviews WHERE target_user_id = $1 ORDER BY created_at DESC',

@@ -1,7 +1,9 @@
 import { useMemo } from 'react';
 import { compareMessageTime } from '../../utils/messageTime';
-import { Order, UserAccount, Gig, Message } from '../../types';
+import { Order, UserAccount, Gig, Message, isStaffRole } from '../../types';
 import { WorkstreamItem } from '../../components/workstream/types';
+import { AGENCY_MODE, SITE_CONFIG } from '../../siteConfig';
+import { DEFAULT_AVATAR } from '../../constants';
 
 export interface UseWorkstreamListProps {
   orders?: Order[];
@@ -26,22 +28,40 @@ export function useWorkstreamList({
   impersonatedUser
 }: UseWorkstreamListProps = {}) {
   const hydratedWorkstreamItems: WorkstreamItem[] = useMemo(() => {
-    const activeUid = impersonatedUser ? impersonatedUser.id : currentUser?.id;
+    const activeUser = impersonatedUser || currentUser;
+    const activeUid = activeUser?.id;
     if (!activeUid) return [];
+    const staffViewer = isStaffRole(currentUser?.role);
     const relevantOrders = orders.filter(
       o =>
         o.buyerId === activeUid ||
         o.sellerId === activeUid ||
         (o as any).clientId === activeUid ||
         (o as any).freelancerId === activeUid ||
-        currentUser?.role === 'super_admin' ||
-        currentUser?.role === 'admin' ||
-        (currentUser as any)?.role === 'support_admin'
+        staffViewer
     );
 
     return relevantOrders.map(o => {
-      const seller = usersList.find(u => u.id === o.sellerId || u.id === (o as any).freelancerId);
-      const buyer = usersList.find(u => u.id === o.buyerId || u.id === (o as any).clientId);
+      const sellerId = o.sellerId || (o as any).freelancerId;
+      const buyerId = o.buyerId || (o as any).clientId;
+      const matchedSeller =
+        usersList.find(u => u.id === sellerId) ||
+        (activeUser && activeUser.id === sellerId ? activeUser : undefined) ||
+        (o as any).seller;
+      const seller: UserAccount | undefined = matchedSeller || (AGENCY_MODE && sellerId
+        ? ({
+            id: sellerId,
+            name: SITE_CONFIG.brandName,
+            email: '',
+            role: 'admin',
+            avatar: DEFAULT_AVATAR,
+            status: 'active'
+          } as UserAccount)
+        : undefined);
+      const buyer =
+        usersList.find(u => u.id === buyerId) ||
+        (activeUser && activeUser.id === buyerId ? activeUser : undefined) ||
+        (o as any).buyer;
       const gig = gigs.find(g => g.id === o.gigId);
       
       const orderMsgs = messages.filter(m => m.orderId === o.id);

@@ -26,6 +26,9 @@ export default defineConfig(({ isSsrBuild }) => {
                   if (id.includes('node_modules/react/') || id.includes('node_modules/react-dom/') || id.includes('node_modules/scheduler/')) {
                     return 'vendor-react';
                   }
+                  if (id.includes('node_modules/lucide-react/')) {
+                    return 'vendor-icons';
+                  }
                 },
               },
             },

@@ -5,11 +5,11 @@ import {
   TrendingUp, DollarSign, Sparkles, Ban, Settings, ShieldCheck, ExternalLink,
   PlusCircle, Download, CheckSquare, Square, ChevronDown, Play, Pause
 } from 'lucide-react';
-import { Gig, UserAccount } from '../../types';
+import { Gig, UserAccount, isStaffRole } from '../../types';
 import { DEFAULT_AVATAR, DEFAULT_GIG_IMAGE } from '../../constants';
 import { getAuthToken } from '../../utils/authToken';
 import { getDeviceId } from '../../utils/deviceId';
-import { SITE_CONFIG } from '../../siteConfig';
+import { AGENCY_MODE, SITE_CONFIG } from '../../siteConfig';
 import { downloadSafeCsv } from '../../utils/csvExport';
 
 const DELETED_GIGS_KEY = `${SITE_CONFIG.brandWordmark.toLowerCase()}_deleted_gigs`;
@@ -370,13 +370,17 @@ export const AdminGigsModule: React.FC<AdminGigsModuleProps> = ({
   const handleAdminCreateGig = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
-    const seller = allUsers.find(u => u.id === selectedSellerId) || allUsers[0] || { id: 'user_1', name: 'Alex Rivera', avatar: '' };
+    const seller =
+      allUsers.find(u => u.id === selectedSellerId) ||
+      allUsers.find(u => isStaffRole(u.role)) ||
+      allUsers[0] ||
+      { id: 'user_super_admin', name: SITE_CONFIG.brandName, avatar: DEFAULT_AVATAR };
     
     const newGigObj = {
       id: 'gig_' + Date.now(),
       freelancerId: seller.id,
-      freelancerName: seller.name,
-      freelancerAvatar: seller.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop',
+      freelancerName: AGENCY_MODE ? SITE_CONFIG.brandName : seller.name,
+      freelancerAvatar: seller.avatar || DEFAULT_AVATAR,
       title: newTitle.trim(),
       category: newCategory,
       description: newDesc.trim() || 'Admin published service offer.',
@@ -384,7 +388,7 @@ export const AdminGigsModule: React.FC<AdminGigsModuleProps> = ({
       deliveryDays: Number(newDelivery),
       rating: 5.0,
       reviewsCount: 0,
-      image: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?w=800&h=500&fit=crop',
+      image: DEFAULT_GIG_IMAGE,
       status: 'active' as const,
       featured: false,
       moderationStatus: 'approved' as const
@@ -966,7 +970,10 @@ export const AdminGigsModule: React.FC<AdminGigsModuleProps> = ({
                   onChange={(e) => setSelectedSellerId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-semibold cursor-pointer"
                 >
-                  {allUsers.filter(u => u.role !== 'admin').map(u => (
+                  {(AGENCY_MODE
+                    ? (allUsers.filter(u => isStaffRole(u.role)).length > 0 ? allUsers.filter(u => isStaffRole(u.role)) : allUsers)
+                    : allUsers.filter(u => u.role !== 'admin')
+                  ).map(u => (
                     <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
                   ))}
                 </select>

@@ -14,6 +14,7 @@ import { financialRepository, financialTransactionService } from '../domains/fin
 import { siteSettings } from '../../src/server/siteSettings.js';
 import { paymentGatewayManager } from '../../src/server/paymentGateways.js';
 import { SITE_CONFIG } from '../../src/siteConfig.js';
+import { DEFAULT_AVATAR } from '../../src/constants.js';
 import {
   requireAuth,
   requireRole,
@@ -38,6 +39,7 @@ import {
   splitOrderFunds,
   registerAuditLog
 } from '../services/orderService.js';
+import { invalidateSsrHtmlCache } from '../ssr.js';
 import { recordMessage } from '../services/messagingService.js';
 import { broadcastMessage, disconnectUserSockets } from '../websocket.js';
 import { notifyUserOnAdminAction } from '../services/notificationService.js';
@@ -452,18 +454,20 @@ const handleGetSiteSettings = async (req: Request, res: Response) => {
 
 const handlePostSiteSettings = async (req: Request, res: Response) => {
   try {
-    const actor = (req as any).authenticatedUser?.name || req.body?.updatedBy || 'Super Admin';
+    const actor = (req as any).authenticatedUser?.name || req.body?.updatedBy || 'Admin';
+    const actorRole = (req as any).authenticatedUser?.role || 'admin';
     const updatedFlattened = siteSettings.updateFromFlatObject(req.body || {}, actor);
     await siteSettings.saveToDatabase();
+    invalidateSsrHtmlCache();
 
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor,
-      role: 'super_admin',
+      role: actorRole,
       action: 'SITE_FEE_SETTINGS_UPDATED',
       target: 'Platform Settings & Fee Structure',
       details: `Updated settings saved to disk and applied across backend engine: Commission=${updatedFlattened.freelancerCommissionRate}%, EscrowHold=${updatedFlattened.escrowHoldDays}d, ClientFee=${updatedFlattened.buyerProcessingFeeRate}%, SmallOrderFee=$${updatedFlattened.smallOrderFee} under $${updatedFlattened.smallOrderFeeThreshold}`,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     res.json({ success: true, settings: updatedFlattened, ...updatedFlattened });
@@ -544,11 +548,11 @@ router.post('/admin/payment-gateways/paypal/environment', requireAdmin, async (r
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor,
-      role: 'super_admin',
+      role: (req as any).authenticatedUser?.role || 'admin',
       action: 'PAYMENT_GATEWAY_ENVIRONMENT_CHANGED',
       target: 'PayPal Environment',
       details: `Switched active PayPal environment to ${environment.toUpperCase()}`,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     res.json({
@@ -580,11 +584,11 @@ router.patch('/admin/payment-gateways/:environment/:gateway', requireAdmin, asyn
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor,
-      role: 'super_admin',
+      role: (req as any).authenticatedUser?.role || 'admin',
       action: 'PAYMENT_GATEWAY_UPDATED',
       target: `${gw.toUpperCase()} (${env.toUpperCase()})`,
       details: `Updated ${gw} configuration for ${env} environment (Enabled: ${updated[gw].enabled}, Primary: ${updated[gw].primary})`,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     res.json({ success: true, environmentGateways: paymentGatewayManager.getMaskedState()[env] });
@@ -608,11 +612,11 @@ router.post('/admin/payment-gateways/:environment/:gateway/test', requireAdmin, 
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor,
-      role: 'super_admin',
+      role: (req as any).authenticatedUser?.role || 'admin',
       action: 'PAYMENT_GATEWAY_CONNECTION_TESTED',
       target: `${gw.toUpperCase()} (${env.toUpperCase()})`,
       details: `Tested connection for ${gw} (${env}): ${result.message}`,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     res.json({ success: result.success, message: result.message });
@@ -653,11 +657,11 @@ router.post('/admin/memberships', requireAdmin, async (req: Request, res: Respon
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor,
-      role: 'super_admin',
+      role: (req as any).authenticatedUser?.role || 'admin',
       action: 'MEMBERSHIPS_QUOTAS_UPDATED',
       target: 'Platform Membership & Gig Quotas',
       details: 'Updated membership plan limits and marketplace gig/project constraints',
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     const activeSettings = siteSettings.getSettings();
@@ -1001,12 +1005,16 @@ router.post('/admin/users/:id/stop-impersonate', requireAdmin, async (req: Reque
 
 router.patch('/admin/users/:id/verify', requireAdmin, async (req: Request, res: Response) => {
   try {
+    const admin = (req as any).authenticatedUser;
     const u = await store.getUser(req.params.id);
     if (!u) return res.status(404).json({ error: 'User not found' });
+    const perm = canActOnTargetUser(admin, u, 'edit');
+    if (!perm.allowed) {
+      return res.status(403).json({ error: perm.reason || 'Forbidden: Insufficient privileges to modify this account.' });
+    }
     u.verified = !u.verified;
     await store.saveUser(u);
 
-    const admin = (req as any).authenticatedUser;
     await registerAuditLog({
       id: 'log_' + Date.now() + '_' + randomUUID().slice(0, 8),
       actor: admin?.name || 'Admin',
@@ -1014,7 +1022,7 @@ router.patch('/admin/users/:id/verify', requireAdmin, async (req: Request, res: 
       action: u.verified ? 'USER_VERIFIED' : 'USER_UNVERIFIED',
       target: `User ${u.name}`,
       details: `Verification status changed to ${u.verified}`,
-      timestamp: new Date().toLocaleString()
+      timestamp: new Date().toISOString()
     });
 
     res.json(safeUser(u));
@@ -1200,11 +1208,11 @@ router.patch('/admin/disputes/:id/resolve', requireAdmin, async (req: Request, r
       await registerAuditLog({
         id: 'log_' + randomUUID().slice(0, 12),
         actor,
-        role: 'super_admin',
+        role: (req as any).authenticatedUser?.role || 'admin',
         action: 'DISPUTE_RESOLVED',
         target: `Dispute #${d.id}`,
         details: `Resolved dispute with status ${status}. Notes: ${notes}`,
-        timestamp: new Date().toLocaleString()
+        timestamp: new Date().toISOString()
       }, client);
     });
 
@@ -1287,7 +1295,7 @@ router.get('/admin/messages/threads', requireAdmin, async (_req: Request, res: R
         participantOne: {
           id: buyer?.id || order.buyerId,
           name: buyer?.name || order.buyerUsername || 'Buyer',
-          avatar: buyer?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop',
+          avatar: buyer?.avatar || DEFAULT_AVATAR,
           role: 'client' as const,
           email: buyer?.email || 'buyer@example.com',
           status: (buyer?.status || 'active') as any
@@ -1295,7 +1303,7 @@ router.get('/admin/messages/threads', requireAdmin, async (_req: Request, res: R
         participantTwo: {
           id: seller?.id || order.sellerId,
           name: seller?.name || order.sellerUsername || 'Seller',
-          avatar: seller?.avatar || 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&h=100&fit=crop',
+          avatar: seller?.avatar || DEFAULT_AVATAR,
           role: 'freelancer' as const,
           email: seller?.email || 'seller@example.com',
           status: (seller?.status || 'active') as any
@@ -1309,7 +1317,7 @@ router.get('/admin/messages/threads', requireAdmin, async (_req: Request, res: R
           id: m.id,
           senderId: m.senderId,
           senderName: m.senderName || 'Participant',
-          senderAvatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=100&h=100&fit=crop',
+          senderAvatar: DEFAULT_AVATAR,
           senderRole: (m.senderId === order.buyerId ? 'client' : 'freelancer') as ('client' | 'freelancer'),
           text: m.text,
           timestamp: m.timestamp
@@ -1773,12 +1781,24 @@ router.patch('/admin/support/:id/status', requireAdmin, async (req: Request, res
   }
 });
 
+export function parseJsonbValue<T>(raw: unknown, fallback: T): T {
+  if (raw === null || raw === undefined) return fallback;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return raw as T;
+}
+
 async function getMetadataJson<T>(key: string, fallback: T): Promise<T> {
   if (!isPostgresEnabled()) return fallback;
   try {
     const res = await postgresStore.getPool().query('SELECT value FROM app_metadata WHERE key = $1 LIMIT 1', [key]);
-    if (res.rows.length > 0 && res.rows[0].value) {
-      return JSON.parse(res.rows[0].value) as T;
+    if (res.rows.length > 0 && res.rows[0].value !== null && res.rows[0].value !== undefined) {
+      return parseJsonbValue<T>(res.rows[0].value, fallback);
     }
   } catch {}
   return fallback;
@@ -1787,10 +1807,13 @@ async function getMetadataJson<T>(key: string, fallback: T): Promise<T> {
 async function setMetadataJson(key: string, val: unknown): Promise<void> {
   if (!isPostgresEnabled()) return;
   await postgresStore.getPool().query(
-    `INSERT INTO app_metadata (key, value) VALUES ($1, $2)
-     ON CONFLICT (key) DO UPDATE SET value = $2`,
+    `INSERT INTO app_metadata (key, value) VALUES ($1, $2::jsonb)
+     ON CONFLICT (key) DO UPDATE SET value = $2::jsonb`,
     [key, JSON.stringify(val)]
   );
+  if (key === 'cms_content') {
+    invalidateSsrHtmlCache();
+  }
 }
 
 router.get('/admin/reports', requireAdmin, async (_req: Request, res: Response) => {
